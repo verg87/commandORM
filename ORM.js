@@ -6,6 +6,7 @@ const dbConfig = {
     database: 'practiceSQL',
     password: process.env['PASSWORD'],
     port: process.env['PORT'], 
+    allowExitOnIdle: true, // Change it in the future
 };
 
 class Database {
@@ -23,7 +24,6 @@ class Database {
                 console.log("Error executing query: " + err);
                 process.exit(-1);
             } finally {
-
                 client.release();
             }
         }
@@ -43,7 +43,7 @@ class Database {
             return rows;
         });
 
-        return func(table_name);
+        return await func(table_name);
     }
 
     async add(table_name, values) {
@@ -83,19 +83,59 @@ class Database {
         func(table_name, values);
     }
 
-    async delete(table_name, condition) {
-        const client = this.pool.connect();
+    async get(table_name, specification) {
+        const func = this.decorator(async (table_name, specification, client) => {
+            const sql = `SELECT * FROM ${table_name}`;
+            const { rows } = await client.query(sql);
 
-        try {
+            if (specification) {
+                return rows.filter(specification);
+            }
+            
+            return rows;
+        });
 
-        } catch (err) {
-            console.log("Unexpected error while deleting row: " + err);
-        } finally {
-            client.release();
-        }
+        return await func(table_name, specification);
+    }
+
+    async delete(table_name, column, condition) {
+        const func = this.decorator(async (table_name, column, condition, client) => {
+            const selectedByCondition = await this.get(table_name, condition);
+            const valuesToDelete = selectedByCondition.map((obj) => obj[column]);
+
+            let operation;
+
+            if (valuesToDelete.every((value) => !value)) {
+                operation = `IS NULL`;
+            } else if (valuesToDelete.every((value) => [undefined, null, false].includes(typeof value))) {
+                operation = `IN (${valuesToDelete.map((value) => {
+                    if (value) 
+                        return "'" + value + "'";
+
+                    return 'NULL';
+                }).join(', ')})`;
+            } else {
+                operation = `IS NULL OR ${column} IN (${valuesToDelete.map((value) => {
+                    if (value)
+                        return "'" + value + "'";
+
+                    return 'NULL';
+                }).join(', ')})`;
+            }  
+
+            const sql = `
+                DELETE FROM ${table_name}
+                WHERE ${column} ${operation}
+            `;
+
+            client.query(sql);
+        });
+
+        func(table_name, column, condition);
     }
 }
 
 const db = new Database(dbConfig);
-const res = await db.add('some_table', {});
+// await db.delete('some_table', 'job', (obj) => obj['job'] === 'programmer');
+const res = await db.get('some_table');
 console.log(res);
