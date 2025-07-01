@@ -1,0 +1,7 @@
+{
+  "type": "module",
+  "dependencies": {
+    "commander": "^14.0.0",
+    "pg": "^8.16.3"
+  }
+}
