@@ -5,7 +5,7 @@ const dbConfig = {
     user: 'postgres',
     host: process.env['HOST'], 
     database: 'practiceSQL',
-    password: process.env['PASSWORD'],
+    password: process.env['POSTGRES_PASSWORD'],
     port: process.env['PORT'], 
 };
 

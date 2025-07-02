@@ -4,16 +4,22 @@ const dbConfig = {
     user: 'postgres',
     host: process.env['HOST'], 
     database: 'practiceSQL',
-    password: process.env['PASSWORD'],
+    password: process.env['POSTGRES_PASSWORD'],
     port: process.env['PORT'], 
     allowExitOnIdle: true, // Change it in the future
 };
 
-class Database {
+class Model {
     constructor(config) {
         this.pool = new Pool(config);
     }
 
+    /** 
+     * Wrapper method to remove the constant
+     * try and catch blocks
+     * @param {function} \the Model method
+     * @returns {function} passes back the wrapped function but with client variable
+    */
     decorator(fn) {
         return async (...args) => {
             const client = await this.pool.connect();
@@ -30,7 +36,7 @@ class Database {
     }
 
     async get_schema_data(table_name) {
-        const func = this.decorator(async (table_name, client) => {
+        return await this.decorator(async (table_name, client) => {
             const query = `
                 SELECT column_name, column_default, is_nullable, data_type
                 FROM information_schema.columns
@@ -41,13 +47,11 @@ class Database {
             const { rows } = await client.query(query, [table_name]);
 
             return rows;
-        });
-
-        return await func(table_name);
+        })(table_name);
     }
 
-    async add(table_name, values) {
-        const func = this.decorator(async (table_name, values, client) => {
+    add(table_name, values) {
+        this.decorator(async (table_name, values, client) => {
             const schemaData = await this.get_schema_data(table_name);
             const columnNames = schemaData.map((columnData) => columnData['column_name']);
 
@@ -78,13 +82,74 @@ class Database {
             `;
 
             await client.query(sql, valuesArray);
-        });
+        })(table_name, values);
+    }
 
-        func(table_name, values);
+    createColumn(table_name, columnData) {
+        this.decorator(async (table_name, columnData, client) => {
+            const schemaData = await this.get_schema_data(table_name);
+            const { name, defaultValue, type } = columnData;
+            const columnNames = schemaData.map((columnData) => columnData['column_name']);
+
+            let defaultValueSqlString = ``;
+            let typeSqlString = ``;
+
+            if (columnNames.includes(name)) {
+                throw new Error(`Duplicate column name: ${name}`);
+            } else if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name)) {
+                throw new Error(`Invalid column name: ${name}`);
+            }
+
+            // Need to change this shitcode
+            if (type['name'] === 'string') {
+                if (!type.max) throw new Error('string type requires max length');
+
+                defaultValueSqlString = `DEFAULT '${defaultValue}'`;
+                typeSqlString = `VARCHAR(${type['max']})`;
+            } else if (type['name'] === 'int') {
+
+                defaultValueSqlString = `DEFAULT ${defaultValue}`;
+                typeSqlString = `INT`;
+            } else if (type['name'] === 'float') {
+                if (!type.max || !type.min) throw new Error('float type requires max and min');
+
+                defaultValueSqlString = `DEFAULT ${defaultValue}`;
+                typeSqlString = `DECIMAL(${type['max'], type['min']})`;
+            } else if (type['name'] === 'date' || type['name'] === 'timestamp') {
+
+                // Maybe first check if the defaultValue is like datetime
+                defaultValueSqlString = `DEFAULT '${defaultValue}'`;
+                typeSqlString = type['name'].toUpperCase();
+            } else {
+                throw new Error(`Unsupported data type: ${type['name']}`);
+            }
+
+            if (defaultValue === undefined) {
+                console.log(`${name} will be set to null`);
+                defaultValueSqlString = `DEFAULT NULL`
+            }
+
+            const sql = `
+                ALTER TABLE ${table_name}
+                ADD COLUMN ${name} ${typeSqlString} ${defaultValueSqlString};
+            `;
+
+            await client.query(sql);
+        })(table_name, columnData);
+    }
+
+    createTable(table_name) {
+        this.decorator(async (table_name, client) => {
+            const schemaData = await this.get_schema_data(table_name);
+            
+            if (schemaData.length) {
+                throw new Error(`table "${table_name}" already exists`);
+            }
+        })(table_name);
     }
 
     async get(table_name, specification) {
-        const func = this.decorator(async (table_name, specification, client) => {
+        return await this.decorator(async (table_name, specification, client) => {
             const sql = `SELECT * FROM ${table_name}`;
             const { rows } = await client.query(sql);
 
@@ -93,13 +158,11 @@ class Database {
             }
             
             return rows;
-        });
-
-        return await func(table_name, specification);
+        })(table_name, specification);
     }
 
-    async delete(table_name, column, condition) {
-        const func = this.decorator(async (table_name, column, condition, client) => {
+    delete(table_name, column, condition) {
+        this.decorator(async (table_name, column, condition, client) => {
             const selectedByCondition = await this.get(table_name, condition);
             const valuesToDelete = selectedByCondition.map((obj) => obj[column]);
 
@@ -125,17 +188,36 @@ class Database {
 
             const sql = `
                 DELETE FROM ${table_name}
-                WHERE ${column} ${operation}
+                WHERE ${column} ${operation};
             `;
 
             client.query(sql);
-        });
+        })(table_name, column, condition);
+    }
 
-        func(table_name, column, condition);
+    deleteColumn(table_name, column) {
+        this.decorator(async (table_name, column, client) => {
+            const schemaData = await this.get_schema_data(table_name);
+            const columnNames = schemaData.map(f => f.column_name);
+
+            if (!schemaData.length) {
+                throw new Error(`table "${table_name}" doesn't exist`)
+            } else if (!columnNames.includes(column)) {
+                throw new Error(`column "${column}" doesn't exist in ${table_name}`);
+            }
+
+            const sql = `
+                ALTER TABLE ${table_name}
+                DROP COLUMN ${column};
+            `;
+
+            await client.query(sql);
+        })(table_name, column);
     }
 }
 
-const db = new Database(dbConfig);
+const db = new Model(dbConfig);
 // await db.delete('some_table', 'job', (obj) => obj['job'] === 'programmer');
-const res = await db.get('some_table');
-console.log(res);
+// db.add('some_table', {name: "John", job: "Mustard"});
+// const res = await db.get('some_table');
+// console.log(res);
