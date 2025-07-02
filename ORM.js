@@ -15,11 +15,12 @@ class Model {
     }
 
     /** 
-     * Wrapper method to remove the constant
-     * try and catch blocks
-     * @param {function} \the Model method
-     * @returns {function} passes back the wrapped function but with client variable
-    */
+     * Wrapper method to remove the constant try and catch blocks
+     * @param {function} fn The asynchronous model method to be decorated.                                                                                                                     │
+     * It will receive a `client` object as its last argument.                                                                                                                                 │
+     * @returns {function} An asynchronous function that, when called, will                                                                                                                    │
+     * execute the decorated method with a connected database client.    
+     */
     decorator(fn) {
         return async (...args) => {
             const client = await this.pool.connect();
@@ -27,21 +28,29 @@ class Model {
             try {
                 return await fn(...args, client);
             } catch (err) {
-                console.log("Error executing query: " + err);
+                console.log(err);
                 process.exit(-1);
             } finally {
                 client.release();
             }
         }
+        
     }
 
+    /**
+     * Retrieves the schema information for a given table.
+     * @param {string} table_name The name of the table.
+     * @returns {Promise<Array<object>>} A promise that resolves to an array of objects,
+     * each representing a column in the table. Each object contains `column_name`,
+     * `column_default`, `is_nullable`, and `data_type`.
+     */
     async get_schema_data(table_name) {
         return await this.decorator(async (table_name, client) => {
             const query = `
                 SELECT column_name, column_default, is_nullable, data_type
                 FROM information_schema.columns
                 WHERE table_schema='public'
-                AND table_name=\$1;
+                AND table_name=$1;
             `;
 
             const { rows } = await client.query(query, [table_name]);
@@ -50,8 +59,15 @@ class Model {
         })(table_name);
     }
 
-    add(table_name, values) {
-        this.decorator(async (table_name, values, client) => {
+    /**
+     * Inserts a new row into the specified table.
+     * @param {string} table_name The name of the table.
+     * @param {object} values An object where keys are column names and values are the values to insert.
+     * @throws {Error} If a mandatory column is missing a value.
+     * @throws {Error} If `values` contains keys that are not valid column names.
+     */
+    async add(table_name, values) {
+        await this.decorator(async (table_name, values, client) => {
             const schemaData = await this.get_schema_data(table_name);
             const columnNames = schemaData.map((columnData) => columnData['column_name']);
 
@@ -85,14 +101,30 @@ class Model {
         })(table_name, values);
     }
 
-    createColumn(table_name, columnData) {
-        this.decorator(async (table_name, columnData, client) => {
+    /**
+     * Creates a new column in a specified table.
+     *
+     * @param {string} table_name - The name of the table to add the column to.
+     * @param {object} columnData - An object containing the configuration for the new column.
+     * @param {string} columnData.name - The name of the new column. Must be a valid SQL identifier.
+     * @param {string} columnData.type - The data type of the column. Supported types: 'string', 'int', 'float', 'date', 'timestamp', 'time'.
+     * @param {number} [columnData.length] - The maximum length for 'string' type columns. Required if type is 'string'.
+     * @param {number} [columnData.precision] - The total number of digits for 'float' type columns. Required if type is 'float'.
+     * @param {number} [columnData.scale] - The number of digits to the right of the decimal point for 'float' type columns. Required if type is 'float'.
+     * @param {*} [columnData.defaultValue] - The default value for the column. If a string or date, it will be wrapped in single quotes.
+     * @param {boolean} [columnData.nullable=true] - Whether the column can accept NULL values. Set to `false` for NOT NULL.
+     * @throws {Error} If the column name is a duplicate or invalid.
+     * @throws {Error} If required parameters for a data type are missing (e.g., length for string).
+     * @throws {Error} If an unsupported data type is specified.
+     */
+    async createColumn(table_name, columnData) {
+        await this.decorator(async (table_name, columnData, client) => {
             const schemaData = await this.get_schema_data(table_name);
-            const { name, defaultValue, type } = columnData;
+            const { name, type, length, precision, scale, defaultValue, nullable } = columnData;
             const columnNames = schemaData.map((columnData) => columnData['column_name']);
 
-            let defaultValueSqlString = ``;
-            let typeSqlString = ``;
+            let defaultClause = ``;
+            let sqlType = ``;
 
             if (columnNames.includes(name)) {
                 throw new Error(`Duplicate column name: ${name}`);
@@ -100,54 +132,73 @@ class Model {
                 throw new Error(`Invalid column name: ${name}`);
             }
 
-            // Need to change this shitcode
-            if (type['name'] === 'string') {
-                if (!type.max) throw new Error('string type requires max length');
+            sqlType = (() => {
+                if (type === 'string') {
+                    if (!length) throw new Error('string type requires max length');
 
-                defaultValueSqlString = `DEFAULT '${defaultValue}'`;
-                typeSqlString = `VARCHAR(${type['max']})`;
-            } else if (type['name'] === 'int') {
+                    return `VARCHAR(${length})`;
+                } else if (type === 'int') {
+                    return `INT`;
+                } else if (type === 'float') {
+                    if (!precision || !scale) throw new Error('float type requires max and min');
 
-                defaultValueSqlString = `DEFAULT ${defaultValue}`;
-                typeSqlString = `INT`;
-            } else if (type['name'] === 'float') {
-                if (!type.max || !type.min) throw new Error('float type requires max and min');
+                    return `DECIMAL(${precision}, ${scale})`;
+                } else if (['date', 'timestamp', 'time'].includes(type)) {
+                    return type.toUpperCase();
+                } else {
+                    throw new Error(`Unsupported data type: ${type['name']}`);
+                }
+            })();
+            
+            if (defaultValue !== undefined && defaultValue !== null) {
+                if (['string', 'date', 'timestamp'].includes(type)) {
+                    defaultClause = `DEFAULT '${String(defaultValue)}'`;
+                } else {
+                    defaultClause = `DEFAULT ${defaultValue}`;
+                }
 
-                defaultValueSqlString = `DEFAULT ${defaultValue}`;
-                typeSqlString = `DECIMAL(${type['max'], type['min']})`;
-            } else if (type['name'] === 'date' || type['name'] === 'timestamp') {
-
-                // Maybe first check if the defaultValue is like datetime
-                defaultValueSqlString = `DEFAULT '${defaultValue}'`;
-                typeSqlString = type['name'].toUpperCase();
-            } else {
-                throw new Error(`Unsupported data type: ${type['name']}`);
+            } else if (defaultValue !== false) {
+                defaultClause = `DEFAULT NULL`;
             }
 
-            if (defaultValue === undefined) {
-                console.log(`${name} will be set to null`);
-                defaultValueSqlString = `DEFAULT NULL`
-            }
+            const nullClause = nullable === false ? "NOT NULL" : "";
 
             const sql = `
                 ALTER TABLE ${table_name}
-                ADD COLUMN ${name} ${typeSqlString} ${defaultValueSqlString};
+                ADD COLUMN ${name} ${sqlType} ${nullClause} ${defaultClause};
             `;
 
             await client.query(sql);
         })(table_name, columnData);
     }
 
-    createTable(table_name) {
-        this.decorator(async (table_name, client) => {
+    /**
+     * Creates a new table in the database.
+     * @param {string} table_name The name of the table to create.
+     * @throws {Error} If the table already exists.
+     */
+    async createTable(table_name) {
+        await this.decorator(async (table_name, client) => {
             const schemaData = await this.get_schema_data(table_name);
             
             if (schemaData.length) {
                 throw new Error(`table "${table_name}" already exists`);
             }
+
+            // I could implement adding columns to table when creating it but maybe later...
+            const sql = `CREATE TABLE ${table_name} ();`;
+
+            await client.query(sql);
         })(table_name);
     }
 
+    /**
+     * Retrieves records from a table.
+     * @param {string} table_name The name of the table.
+     * @param {function(object): boolean} [specification] A function to filter the results.
+     * It receives a row object and should return `true` to include the row in the result.
+     * @returns {Promise<Array<object>>} A promise that resolves to an array of row objects.
+     */
     async get(table_name, specification) {
         return await this.decorator(async (table_name, specification, client) => {
             const sql = `SELECT * FROM ${table_name}`;
@@ -161,8 +212,14 @@ class Model {
         })(table_name, specification);
     }
 
-    delete(table_name, column, condition) {
-        this.decorator(async (table_name, column, condition, client) => {
+    /**
+     * Deletes rows from a table based on a condition.
+     * @param {string} table_name The name of the table.
+     * @param {string} column The column to use for the WHERE clause.
+     * @param {function(object): boolean} condition A function that filters which rows to delete.
+     */
+    async delete(table_name, column, condition) {
+        await this.decorator(async (table_name, column, condition, client) => {
             const selectedByCondition = await this.get(table_name, condition);
             const valuesToDelete = selectedByCondition.map((obj) => obj[column]);
 
@@ -195,17 +252,13 @@ class Model {
         })(table_name, column, condition);
     }
 
-    deleteColumn(table_name, column) {
-        this.decorator(async (table_name, column, client) => {
-            const schemaData = await this.get_schema_data(table_name);
-            const columnNames = schemaData.map(f => f.column_name);
-
-            if (!schemaData.length) {
-                throw new Error(`table "${table_name}" doesn't exist`)
-            } else if (!columnNames.includes(column)) {
-                throw new Error(`column "${column}" doesn't exist in ${table_name}`);
-            }
-
+    /**
+     * Deletes a column from a table.
+     * @param {string} table_name The name of the table.
+     * @param {string} column The name of the column to delete.
+     */
+    async deleteColumn(table_name, column) {
+        await this.decorator(async (table_name, column, client) => {
             const sql = `
                 ALTER TABLE ${table_name}
                 DROP COLUMN ${column};
@@ -214,10 +267,20 @@ class Model {
             await client.query(sql);
         })(table_name, column);
     }
+
+    /**
+     * Deletes a table from the database.
+     * @param {string} table_name The name of the table to delete.
+     */
+    async deleteTable(table_name) {
+        await this.decorator(async (table_name, client) => {
+            const sql = `DROP TABLE ${table_name}`;
+
+            await client.query(sql);
+        })(table_name);
+    }
 }
 
 const db = new Model(dbConfig);
-// await db.delete('some_table', 'job', (obj) => obj['job'] === 'programmer');
-// db.add('some_table', {name: "John", job: "Mustard"});
-// const res = await db.get('some_table');
+const res = await db.get('some_table');
 // console.log(res);
