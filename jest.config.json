@@ -1,3 +1,6 @@
 {
-  "collectCoverage": true
+  "collectCoverage": true,
+  "transform": {
+    "^.+\\.(js|jsx)$": "babel-jest"
+  }
 }

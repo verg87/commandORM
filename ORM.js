@@ -1,4 +1,4 @@
-const { Pool } = require('pg');
+import { Pool } from 'pg';
 
 const dbConfig = {
     user: 'postgres',
@@ -8,6 +8,16 @@ const dbConfig = {
     port: process.env['PORT'], 
     allowExitOnIdle: true, // Change it in the future
 };
+
+const escapeParam = (value) => {
+    if (typeof value === 'number') {
+        return String(value);
+    } else if (typeof value === 'string') {
+        return "'" + value + "'";
+    } 
+
+    return null;
+}
 
 class Model {
     constructor(config) {
@@ -31,7 +41,7 @@ class Model {
                 console.log(err);
                 process.exit(-1);
             } finally {
-                await client.release();
+                client.release();
             }
         }
         
@@ -62,7 +72,7 @@ class Model {
     /**
      * Checks whether the table already exists or not.
      * @param {string} table_name The name of the table
-     * @returns {Boolean} true or false
+     * @returns {Promise<boolean>} true or false
      */
     async exists(table_name) {
         return await this.decorator(async (table_name, client) => {
@@ -301,21 +311,68 @@ class Model {
     }
 
     /**
-     * Updates certain record corresponding to the column name and the old value.
-     * @param {string} table_name The name of the table
-     * @param {string} columnName column name
-     * @param {string} oldValue the old value
-     * @param {string} newValue new value
+     * Updates records in a table based on a nested condition object.
+     * @param {string} table_name The name of the table.
+     * @param {Object.<string, string|number>} setter An object representing the columns to update.
+     * @param {object} condition A nested object for the WHERE clause.
+     * Keys can be 'AND' or 'OR', with values being objects that continue the nesting.
+     * e.g., { AND: { OR: { name: 'John', job: 'dev' }, status: 'active' } }
+     * translates to: WHERE (name = 'John' OR job = 'dev') AND status = 'active'
      */
-    async update(table_name, columnName, oldValue, newValue) {
-        await this.decorator(async (table_name, columnName, oldValue, newValue, client) => {
+    async update(table_name, setter, condition) {
+        await this.decorator(async (table_name, setter, condition, client) => {
+            const setClauses = Object.entries(setter)
+                .map(([key, value]) => `${key} = ${escapeParam(value)}`)
+                .join(', ');
 
-        })(table_name, columnName, oldValue, newValue);
+            const buildWhereClause = (condObj) => {
+                // Get the top-level logical operator (AND/OR)
+                const topOperator = Object.keys(condObj)[0].toUpperCase();
+                if (topOperator !== 'AND' && topOperator !== 'OR') {
+                    throw new Error('Top-level condition must be an object with a single "AND" or "OR" key.');
+                }
+                const conditions = condObj[Object.keys(condObj)[0]];
+
+                // Recursive parser for nested conditions
+                const parseConditions = (c, op) => {
+                    const parts = Object.entries(c).map(([key, value]) => {
+                        const upperKey = key.toUpperCase();
+                        if (upperKey === 'AND' || upperKey === 'OR') {
+                            // If the key is a logical operator, recurse
+                            return `(${parseConditions(value, upperKey)})`;
+                        } else {
+                            // Otherwise, it's a field=value condition
+                            if (Array.isArray(value)) {
+                                return `${key} IN (${value.map(v => escapeParam(v)).join(', ')})`;
+                            }
+                            return `${key} = ${escapeParam(value)}`;
+                        }
+                    });
+                    return parts.join(` ${op} `);
+                };
+
+                return parseConditions(conditions, topOperator);
+            };
+
+            const whereClauses = buildWhereClause(condition);
+
+            const sql = `
+                UPDATE ${table_name}
+                SET ${setClauses}
+                WHERE ${whereClauses};
+            `;
+
+            console.log(sql);
+            // await client.query(sql);
+        })(table_name, setter, condition);
     }
 }
 
-// const db = new Model(dbConfig);
+// Do not run npm test with this not commented out
+const db = new Model(dbConfig);
+// Maybe condition argument will be changed to the below 3rd argument
+await db.update('some_table', {job: 'something'}, {name: {value: 'Gustavo', operator: '='}, OR: null, job: {value: 'janitor', operator: '='}});
 // const res = await db.exists('some_table');
 // console.log(res);
 
-module.exports = {Model, dbConfig}
+export {Model, dbConfig};

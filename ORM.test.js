@@ -1,4 +1,4 @@
-const {Model, dbConfig} = require('./ORM.js');
+import {Model, dbConfig} from './ORM.js';
 
 const db = new Model(dbConfig);
 
