@@ -1,4 +1,4 @@
-import { Pool } from 'pg';
+const { Pool } = require('pg');
 
 const dbConfig = {
     user: 'postgres',
@@ -31,7 +31,7 @@ class Model {
                 console.log(err);
                 process.exit(-1);
             } finally {
-                client.release();
+                await client.release();
             }
         }
         
@@ -56,6 +56,26 @@ class Model {
             const { rows } = await client.query(query, [table_name]);
 
             return rows;
+        })(table_name);
+    }
+
+    /**
+     * Checks whether the table already exists or not.
+     * @param {string} table_name The name of the table
+     * @returns {Boolean} true or false
+     */
+    async exists(table_name) {
+        return await this.decorator(async (table_name, client) => {
+            const sql = `
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_schema = 'public'
+                    AND table_name = $1
+                );
+            `;
+
+            const { rows } = await client.query(sql, [table_name]);
+            return rows[0].exists;
         })(table_name);
     }
 
@@ -279,8 +299,23 @@ class Model {
             await client.query(sql);
         })(table_name);
     }
+
+    /**
+     * Updates certain record corresponding to the column name and the old value.
+     * @param {string} table_name The name of the table
+     * @param {string} columnName column name
+     * @param {string} oldValue the old value
+     * @param {string} newValue new value
+     */
+    async update(table_name, columnName, oldValue, newValue) {
+        await this.decorator(async (table_name, columnName, oldValue, newValue, client) => {
+
+        })(table_name, columnName, oldValue, newValue);
+    }
 }
 
-const db = new Model(dbConfig);
-const res = await db.get('some_table');
+// const db = new Model(dbConfig);
+// const res = await db.exists('some_table');
 // console.log(res);
+
+module.exports = {Model, dbConfig}
