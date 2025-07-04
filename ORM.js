@@ -6,23 +6,17 @@ const dbConfig = {
     host: process.env['HOST'], 
     database: 'practiceSQL',
     password: process.env['POSTGRES_PASSWORD'],
-    port: process.env['PORT'], 
+    port: process.env['PORT'], // Set it to your own port
     allowExitOnIdle: true, // Change it in the future
 };
 
-const escapeParam = (value) => {
-    if (typeof value === 'number') {
-        return String(value);
-    } else if (typeof value === 'string') {
-        return "'" + value + "'";
-    } 
-
-    return null;
-}
-
+/**
+ * Represents a single database
+ */
 class Model {
-    constructor(config) {
+    constructor(config, schemaName) {
         this.pool = new Pool(config);
+        this.schema = schemaName;
     }
 
     /** 
@@ -49,22 +43,44 @@ class Model {
     }
 
     /**
+     * Retrieves primary keys for a given table.
+     * @param {string} table_name the name of the table
+     * @returns An array with objects inside. Each object represents one primary key and their type
+     */
+    async getPrimaryKeys(table_name) {
+        return await this.decorator(async (table_name, client) => {
+            const sql = `
+                SELECT c.column_name, c.data_type
+                FROM information_schema.table_constraints tc 
+                JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_name) 
+                JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema
+                AND tc.table_name = c.table_name AND ccu.column_name = c.column_name
+                WHERE constraint_type = 'PRIMARY KEY' and tc.table_name = $1;
+            `;
+
+            const { rows } = await client.query(sql, [table_name]);
+
+            return rows;
+        })(table_name);
+    }
+
+    /**
      * Retrieves the schema information for a given table.
      * @param {string} table_name The name of the table.
      * @returns {Promise<Array<object>>} A promise that resolves to an array of objects,
      * each representing a column in the table. Each object contains `column_name`,
      * `column_default`, `is_nullable`, and `data_type`.
      */
-    async get_schema_data(table_name) {
+    async getSchemaData(table_name) {
         return await this.decorator(async (table_name, client) => {
             const query = `
                 SELECT column_name, column_default, is_nullable, data_type
                 FROM information_schema.columns
-                WHERE table_schema='public'
-                AND table_name=$1;
+                WHERE table_schema=$1
+                AND table_name=$2;
             `;
 
-            const { rows } = await client.query(query, [table_name]);
+            const { rows } = await client.query(query, [this.schema, table_name]);
 
             return rows;
         })(table_name);
@@ -80,12 +96,12 @@ class Model {
             const sql = `
                 SELECT EXISTS (
                     SELECT FROM information_schema.tables 
-                    WHERE table_schema = 'public'
-                    AND table_name = $1
+                    WHERE table_schema = $1
+                    AND table_name = $2
                 );
             `;
 
-            const { rows } = await client.query(sql, [table_name]);
+            const { rows } = await client.query(sql, [this.schema, table_name]);
             return rows[0].exists;
         })(table_name);
     }
@@ -99,47 +115,40 @@ class Model {
      */
     async add(table_name, values) {
         await this.decorator(async (table_name, values, client) => {
-            const finalInsertColumns = Object.keys(values);
+            const keysArray = Object.keys(values);
+            const valuesArray = Object.values(values);
 
-            if (finalInsertColumns.some((columnName) => !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(columnName))) {
+            if (keysArray.some((columnName) => !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(columnName))) {
                 throw new Error(`Column names can consist of only upper or lower cased letters, underscores and numbers`);
             }
 
-            const schemaData = await this.get_schema_data(table_name);
+            const schemaData = await this.getSchemaData(table_name);
             const columnNames = schemaData.map((columnData) => columnData['column_name']);
 
             const mandatoryColumns = schemaData
                 .filter(col => col.is_nullable === 'NO')
                 .map(col => col.column_name);
 
-            const columnsToInsertString = '(' + finalInsertColumns.join(', ') + ')';
+            const columnsToInsertString = '(' + keysArray.join(', ') + ')';
 
             for (const col of mandatoryColumns) {
                 if (!Object.prototype.hasOwnProperty.call(values, col)) {
                     throw new Error(`Missing mandatory column value: ${col}`);
                 }
             }
-            
-            if (Object.keys(values).length > columnNames.length) {
+
+            if (keysArray.length > columnNames.length) {
                 throw new Error(`Some of the values's keys aren't valid columns in ${table_name} table`);
             }
 
-            const paramPlaceholders = finalInsertColumns.map((_, idx) => `$${idx + 1}`).join(', ');
-            const valuesArray = Object.values(values);
+            const sql = format(`INSERT INTO %I %s VALUES (%L)`, table_name, columnsToInsertString, valuesArray)
 
-            const sql = `
-                INSERT INTO ${table_name}
-                ${columnsToInsertString}
-                VALUES (${paramPlaceholders});
-            `;
-
-            await client.query(sql, valuesArray);
+            await client.query(sql);
         })(table_name, values);
     }
 
     /**
      * Creates a new column in a specified table.
-     *
      * @param {string} table_name - The name of the table to add the column to.
      * @param {object} columnData - An object containing the configuration for the new column.
      * @param {string} columnData.name - The name of the new column. Must be a valid SQL identifier.
@@ -155,7 +164,7 @@ class Model {
      */
     async createColumn(table_name, columnData) {
         await this.decorator(async (table_name, columnData, client) => {
-            const schemaData = await this.get_schema_data(table_name);
+            const schemaData = await this.getSchemaData(table_name);
             const { name, type, length, precision, scale, defaultValue, nullable } = columnData;
             const columnNames = schemaData.map((columnData) => columnData['column_name']);
 
@@ -234,6 +243,70 @@ class Model {
             
             return rows;
         })(table_name, specification);
+    }
+
+    /**
+     * Counts the number of rows in a given table
+     * @param {string} table_name the name of the table
+     * @returns the number of rows in the table
+     */
+    async countRows(table_name) {
+        return await this.decorator(async (table_name, client) => {
+            if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(table_name)) 
+                throw new Error(`Table names can consist of only upper or lower cased letters, underscores and numbers`);
+
+            const sql = format(`SELECT COUNT(*) FROM %I`, table_name);
+            const { rows } = await client.query(sql);
+
+            return rows[0].count;
+        })(table_name);
+    }
+
+    /**
+     * Returns the first item in the table
+     * @param {string} table_name the name of the table
+     * @returns the very first row in the table
+     */
+    async firstItem(table_name) {
+        return await this.decorator(async (table_name, client) => {
+            if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(table_name)) 
+                throw new Error(`Table names can consist of only upper or lower cased letters, underscores and numbers`);
+
+            const sql = format(`SELECT * FROM %I LIMIT 1`, table_name);
+            const { rows } = await client.query(sql);
+
+            return rows;
+        })(table_name);
+    }
+
+    /**
+     * Returns the last item in the table
+     * @param {string} table_name the name of the table
+     * @returns the last row in a given table
+     */
+    async lastItem(table_name) {
+        if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(table_name)) 
+            throw new Error(`Table names can consist of only upper or lower cased letters, underscores and numbers`);
+
+        const hasPrimaryKeys = await this.getPrimaryKeys(table_name);
+        let obj;
+
+        if (hasPrimaryKeys.length) {
+            obj = await this.decorator(async (table_name, client) => {
+                const sql = format(`SELECT * FROM %I ORDER BY (%s) DESC LIMIT 1`, 
+                    table_name, hasPrimaryKeys.map(col => col.column_name));
+
+                return await client.query(sql);
+            })(table_name);
+
+            obj = obj.rows;
+        } else {
+            // If a tabel has no primary keys we can only get the last row 
+            // by quering all the rows and then returning the last one from that.
+            obj = await this.get(table_name);
+        }
+
+        return obj[obj.length - 1];
     }
 
     /**
@@ -349,11 +422,8 @@ class Model {
 }
 
 // Do not run npm test with this not commented out
-// const db = new Model(dbConfig);
-// await db.createColumn('some_table', {name: 'gpa', type: 'string', length: 20, defaultValue: 'good'})
-// await db.delete('some_table', 'age', (obj) => obj['age'] < 100);
-// await db.update('some_table', {job: 'something'}, {name: {value: ['Gustavo', 'nameless'], op: '='}, OR: null, job: {value: 'janitor', op: '='}});
-// const res = await db.get('some_table');
+// const model = new Model(dbConfig, 'public');
+// const res = await model.lastItem('some_table');
 // console.log(res);
 
 export {Model, dbConfig};
