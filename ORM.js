@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import format from 'pg-format';
 
 const dbConfig = {
     user: 'postgres',
@@ -98,6 +99,12 @@ class Model {
      */
     async add(table_name, values) {
         await this.decorator(async (table_name, values, client) => {
+            const finalInsertColumns = Object.keys(values);
+
+            if (finalInsertColumns.some((columnName) => !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(columnName))) {
+                throw new Error(`Column names can consist of only upper or lower cased letters, underscores and numbers`);
+            }
+
             const schemaData = await this.get_schema_data(table_name);
             const columnNames = schemaData.map((columnData) => columnData['column_name']);
 
@@ -105,7 +112,6 @@ class Model {
                 .filter(col => col.is_nullable === 'NO')
                 .map(col => col.column_name);
 
-            const finalInsertColumns = Object.keys(values);
             const columnsToInsertString = '(' + finalInsertColumns.join(', ') + ')';
 
             for (const col of mandatoryColumns) {
@@ -119,7 +125,7 @@ class Model {
             }
 
             const paramPlaceholders = finalInsertColumns.map((_, idx) => `$${idx + 1}`).join(', ');
-            const valuesArray = finalInsertColumns.map(col => values[col]);
+            const valuesArray = Object.values(values);
 
             const sql = `
                 INSERT INTO ${table_name}
@@ -153,7 +159,6 @@ class Model {
             const { name, type, length, precision, scale, defaultValue, nullable } = columnData;
             const columnNames = schemaData.map((columnData) => columnData['column_name']);
 
-            let defaultClause = ``;
             let sqlType = ``;
 
             if (columnNames.includes(name)) {
@@ -180,23 +185,11 @@ class Model {
                 }
             })();
             
-            if (defaultValue !== undefined && defaultValue !== null) {
-                if (['string', 'date', 'timestamp'].includes(type)) {
-                    defaultClause = `DEFAULT '${String(defaultValue)}'`;
-                } else {
-                    defaultClause = `DEFAULT ${defaultValue}`;
-                }
-
-            } else if (defaultValue !== false) {
-                defaultClause = `DEFAULT NULL`;
-            }
-
+            const defaultClause = defaultValue !== undefined ? format(`DEFAULT %L`, defaultValue) : '';
             const nullClause = nullable === false ? "NOT NULL" : "";
 
-            const sql = `
-                ALTER TABLE ${table_name}
-                ADD COLUMN ${name} ${sqlType} ${nullClause} ${defaultClause};
-            `;
+            const sql = format(`ALTER TABLE %I ADD COLUMN %I %s %s %s;`, 
+                table_name, name, sqlType, nullClause, defaultClause);
 
             await client.query(sql);
         })(table_name, columnData);
@@ -206,17 +199,18 @@ class Model {
      * Creates a new table in the database.
      * @param {string} table_name The name of the table to create.
      * @throws {Error} If the table already exists.
+     * @throws {Error} If table name isn't valid.
      */
     async createTable(table_name) {
         await this.decorator(async (table_name, client) => {
-            const schemaData = await this.get_schema_data(table_name);
-            
-            if (schemaData.length) {
-                throw new Error(`table "${table_name}" already exists`);
-            }
+            const exists = await this.exists(table_name);
 
-            // I could implement adding columns to table when creating it but maybe later...
-            const sql = `CREATE TABLE ${table_name} ();`;
+            if (exists) 
+                throw new Error(`table "${table_name}" already exists`);
+            else if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(table_name)) 
+                throw new Error(`Table names can consist of only upper or lower cased letters, underscores and numbers`);
+            
+            const sql = format(`CREATE TABLE %I ();`, table_name);
 
             await client.query(sql);
         })(table_name);
@@ -231,7 +225,7 @@ class Model {
      */
     async get(table_name, specification) {
         return await this.decorator(async (table_name, specification, client) => {
-            const sql = `SELECT * FROM ${table_name}`;
+            const sql = format(`SELECT * FROM %I;`, table_name);
             const { rows } = await client.query(sql);
 
             if (specification) {
@@ -250,33 +244,23 @@ class Model {
      */
     async delete(table_name, column, condition) {
         await this.decorator(async (table_name, column, condition, client) => {
+            if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(column)) throw new Error(`Column names can consist of only upper or lower cased letters, underscores and numbers`);
+
             const selectedByCondition = await this.get(table_name, condition);
             const valuesToDelete = selectedByCondition.map((obj) => obj[column]);
 
             let operation;
 
-            if (valuesToDelete.every((value) => !value)) {
+            if (valuesToDelete.every((value) => value === null)) {
                 operation = `IS NULL`;
-            } else if (valuesToDelete.every((value) => [undefined, null, false].includes(typeof value))) {
-                operation = `IN (${valuesToDelete.map((value) => {
-                    if (value) 
-                        return "'" + value + "'";
-
-                    return 'NULL';
-                }).join(', ')})`;
+            } else if (valuesToDelete.some((value) => value === null)) {
+                operation = format(`IS NULL OR %I IN (%L)`, column, 
+                    valuesToDelete.filter((value) => value !== null));
             } else {
-                operation = `IS NULL OR ${column} IN (${valuesToDelete.map((value) => {
-                    if (value)
-                        return "'" + value + "'";
-
-                    return 'NULL';
-                }).join(', ')})`;
+                operation = format(`IN (%L)`, valuesToDelete);
             }  
 
-            const sql = `
-                DELETE FROM ${table_name}
-                WHERE ${column} ${operation};
-            `;
+            const sql = format(`DELETE FROM %I WHERE %I %s;`, table_name, column, operation);
 
             client.query(sql);
         })(table_name, column, condition);
@@ -289,10 +273,11 @@ class Model {
      */
     async deleteColumn(table_name, column) {
         await this.decorator(async (table_name, column, client) => {
-            const sql = `
-                ALTER TABLE ${table_name}
-                DROP COLUMN ${column};
-            `;
+            if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(column)) {
+                throw new Error(`Column names can consist of only upper or lower cased letters, underscores and numbers`);
+            }
+
+            const sql = format(`ALTER TABLE %I DROP COLUMN %I;`, table_name, column);
 
             await client.query(sql);
         })(table_name, column);
@@ -304,75 +289,71 @@ class Model {
      */
     async deleteTable(table_name) {
         await this.decorator(async (table_name, client) => {
-            const sql = `DROP TABLE ${table_name}`;
+            const sql = format(`DROP TABLE %I`, table_name)
 
             await client.query(sql);
         })(table_name);
     }
 
     /**
-     * Updates records in a table based on a nested condition object.
+     * Updates records in a table based on a condition object.
      * @param {string} table_name The name of the table.
-     * @param {Object.<string, string|number>} setter An object representing the columns to update.
-     * @param {object} condition A nested object for the WHERE clause.
-     * Keys can be 'AND' or 'OR', with values being objects that continue the nesting.
-     * e.g., { AND: { OR: { name: 'John', job: 'dev' }, status: 'active' } }
-     * translates to: WHERE (name = 'John' OR job = 'dev') AND status = 'active'
+     * @param {Object.<string, string|number>} setter An object representing the columns to update. Each key is a column name and the corresponding value is the new value.
+     * @param {Object.<string, object|null>} condition An object that defines the WHERE clause. The properties are processed in order to build the clause. 
+     * @example
+     * To update rows where name is 'Gustavo' or 'Jack' OR job is 'janitor':
+     * const condition = {
+     *   name: { value: ['Gustavo', 'Jack'], op: '=' }, // -> name IN ('Gustavo', 'Jack')
+     *   OR: null,                                     // -> OR
+     *   job: { value: 'janitor', op: '=' }             // -> job = 'janitor'
+     * };
+     * await db.update('some_table', { status: 'inactive' }, condition);
+     * Resulting WHERE clause: WHERE name IN ('Gustavo', 'Jack') OR job = 'janitor'
      */
     async update(table_name, setter, condition) {
         await this.decorator(async (table_name, setter, condition, client) => {
+            // No support for -, +, *, / and % operators
+            const operators = ['!=', '<>', '<=', '>=', '>', '<', '='];
+
             const setClauses = Object.entries(setter)
-                .map(([key, value]) => `${key} = ${escapeParam(value)}`)
+                .map(([key, value]) => format(`%I = %L`, key, value))
                 .join(', ');
 
-            const buildWhereClause = (condObj) => {
-                // Get the top-level logical operator (AND/OR)
-                const topOperator = Object.keys(condObj)[0].toUpperCase();
-                if (topOperator !== 'AND' && topOperator !== 'OR') {
-                    throw new Error('Top-level condition must be an object with a single "AND" or "OR" key.');
-                }
-                const conditions = condObj[Object.keys(condObj)[0]];
+            const whereClauses = Object.entries(condition)
+                .map(([key, data]) => {
+                    const { value, op } = data || {};
 
-                // Recursive parser for nested conditions
-                const parseConditions = (c, op) => {
-                    const parts = Object.entries(c).map(([key, value]) => {
-                        const upperKey = key.toUpperCase();
-                        if (upperKey === 'AND' || upperKey === 'OR') {
-                            // If the key is a logical operator, recurse
-                            return `(${parseConditions(value, upperKey)})`;
-                        } else {
-                            // Otherwise, it's a field=value condition
-                            if (Array.isArray(value)) {
-                                return `${key} IN (${value.map(v => escapeParam(v)).join(', ')})`;
-                            }
-                            return `${key} = ${escapeParam(value)}`;
+                    if (['OR', 'AND'].includes(key) && data === null) {
+                        return format(` %s `, key);
+                    } else if (
+                        (['string', 'number'].includes(typeof value) || Array.isArray(value)) && 
+                        typeof data === 'object' && typeof key === 'string' && typeof op === 'string' &&
+                        operators.includes(op)
+                    ) {
+                        if (Array.isArray(value)) {
+                            return format(`%I IN (%L)`, key, value);
                         }
-                    });
-                    return parts.join(` ${op} `);
-                };
+    
+                        return format(`%I %s %L`, key, op, value);
+                    } else {
+                        throw new Error(`key: ${key} and value: ${value} are not valid condition items`)
+                    }
+                })
+                .join("");
 
-                return parseConditions(conditions, topOperator);
-            };
+            const sql = format(`UPDATE %I SET %s WHERE %s;`, table_name, setClauses, whereClauses);
 
-            const whereClauses = buildWhereClause(condition);
-
-            const sql = `
-                UPDATE ${table_name}
-                SET ${setClauses}
-                WHERE ${whereClauses};
-            `;
-
-            console.log(sql);
-            // await client.query(sql);
+            await client.query(sql);
         })(table_name, setter, condition);
     }
 }
 
 // Do not run npm test with this not commented out
-const db = new Model(dbConfig);
-// Maybe condition argument will be changed to the below 3rd argument
-await db.update('some_table', {job: 'something'}, {name: {value: 'Gustavo', operator: '='}, OR: null, job: {value: 'janitor', operator: '='}});
-// const res = await db.exists('some_table');
+// const db = new Model(dbConfig);
+// await db.createColumn('some_table', {name: 'gpa', type: 'string', length: 20, defaultValue: 'good'})
+// await db.delete('some_table', 'age', (obj) => obj['age'] < 100);
+// await db.update('some_table', {job: 'something'}, {name: {value: ['Gustavo', 'nameless'], op: '='}, OR: null, job: {value: 'janitor', op: '='}});
+// const res = await db.get('some_table');
 // console.log(res);
 
 export {Model, dbConfig};

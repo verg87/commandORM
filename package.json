@@ -3,7 +3,8 @@
   "dependencies": {
     "commander": "^14.0.0",
     "jest": "^30.0.3",
-    "pg": "^8.16.3"
+    "pg": "^8.16.3",
+    "pg-format": "^1.0.4"
   },
   "scripts": {
     "test": "jest",

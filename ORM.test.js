@@ -2,6 +2,8 @@ import {Model, dbConfig} from './ORM.js';
 
 const db = new Model(dbConfig);
 
+// await db.deleteTable('tests');
+
 describe('Create tests table', () => {
     test('Create tests table test', async () => {
         await db.createTable('tests');
