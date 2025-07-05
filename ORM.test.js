@@ -206,10 +206,16 @@ describe(`Models update method tests`, () => {
 
 describe(`Model's delete method tests`, () => {
     test(`Delete rows`, async () => {
-        await model.delete('tests', 'age', (obj) => obj.age < 100 || obj.age === null);
+        await model.delete('tests', {columns: ['age', 'name'], ops: ['AND', 'AND']}, (obj) => obj.age < 30 || ['Micah', 'Pedro', 'Gustavo'].includes(obj.name));
         const rows = await model.get('tests');
 
         expect(rows).toStrictEqual([]);
+    });
+
+    test(`Mapping not provided`, async () => {
+        await expect(
+            model.delete('tests', null, (obj) => obj.age > 30)
+        ).rejects.toThrow();
     });
 })
 

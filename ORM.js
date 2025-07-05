@@ -131,7 +131,7 @@ class Model {
             const columnsToInsertString = '(' + keysArray.join(', ') + ')';
 
             for (const col of mandatoryColumns) {
-                if (!Object.prototype.hasOwnProperty.call(values, col)) {
+                if (!Object.hasOwn(values, col)) {
                     throw new Error(`Missing mandatory column value: ${col}`);
                 }
             }
@@ -229,11 +229,14 @@ class Model {
      * @param {string} table_name The name of the table.
      * @param {function(object): boolean} [specification] A function to filter the results.
      * It receives a row object and should return `true` to include the row in the result.
+     * @param {Array<string>} columns An array of columns to select from the table.
      * @returns {Promise<Array<object>>} A promise that resolves to an array of row objects.
      */
-    async get(table_name, specification) {
-        return await this.decorator(async (table_name, specification, client) => {
-            const sql = format(`SELECT * FROM %I;`, table_name);
+    async get(table_name, specification, columns) {
+        return await this.decorator(async (table_name, specification, columns, client) => {
+            const expression = columns?.length ? columns.join(', ') : '*';
+            const sql = format(`SELECT %s FROM %I;`, expression, table_name);
+
             const { rows } = await client.query(sql);
 
             if (specification) {
@@ -241,7 +244,7 @@ class Model {
             }
             
             return rows;
-        })(table_name, specification);
+        })(table_name, specification, columns);
     }
 
     /**
@@ -308,31 +311,51 @@ class Model {
     /**
      * Deletes rows from a table based on a condition.
      * @param {string} table_name The name of the table.
-     * @param {string} column The column to use for the WHERE clause.
+     * @param {Object<string, Array<string>>} mapping The mapping to decide which columns to use 
+     * in WHERE clause and operators with which to join the columns.
+     * @param {array} mapping.columns An array of columns.
+     * @param {array} mapping.ops An array of sql logical operators ('OR', 'AND').
      * @param {function(object): boolean} condition A function that filters which rows to delete.
      */
-    async delete(table_name, column, condition) {
-        await this.decorator(async (table_name, column, condition, client) => {
-            validateSQLName(table_name, column);
+    async delete(table_name, mapping, condition) {
+        await this.decorator(async (table_name, mapping, condition, client) => {
+            const { columns, ops } = mapping || {};
+            if (!columns?.length || !ops?.length) 
+                throw new Error(`Mapping is not provided. Instead got: ${columns} as columns and ${ops} as operators`);
 
-            const selectedByCondition = await this.get(table_name, condition);
-            const valuesToDelete = selectedByCondition.map((obj) => obj[column]);
+            validateSQLName(table_name, ...columns);
 
-            let operation;
-            // ! Fix, method limeted to only one column
-            if (valuesToDelete.every((value) => value === null)) {
-                operation = `IS NULL`;
-            } else if (valuesToDelete.some((value) => value === null)) {
-                operation = format(`IS NULL OR %I IN (%L)`, column, 
-                    valuesToDelete.filter((value) => value !== null));
-            } else {
-                operation = format(`IN (%L)`, valuesToDelete);
-            }  
+            const selectedByCondition = await this.get(table_name, condition, columns);
 
-            const sql = format(`DELETE FROM %I WHERE %I %s;`, table_name, column, operation);
+            const sqlStrings = columns.reduce((acc, col) => {
+                const valuesToDeleteSet = new Set(selectedByCondition.map((obj) => obj[col]));
+                const valuesToDelete = [...valuesToDeleteSet];
+
+                if (valuesToDelete.every((value) => value === null)) {
+                    acc.push(format(`%I IS NULL`, col));
+                } else if (valuesToDelete.some((value) => value === null)) {
+                    acc.push(format(`%1$I IS NULL OR %1$I IN (%L)`, col, 
+                        valuesToDelete.filter((value) => value !== null)));
+                } else {
+                    acc.push(format(`%I IN (%L)`, col, valuesToDelete));
+                } 
+                
+                return acc;
+            }, []);
+            
+            const operation = ops.reduce((acc, op, idx) => {
+                if (sqlStrings[idx] && sqlStrings[idx + 1]) {
+                    acc = sqlStrings[idx] + ` ${op} ` + sqlStrings[idx + 1];
+                    return acc;
+                }
+
+                return acc;
+            }, '') || sqlStrings[0];
+            
+            const sql = format(`DELETE FROM %I WHERE %s;`, table_name, operation);
 
             client.query(sql);
-        })(table_name, column, condition);
+        })(table_name, mapping, condition);
     }
 
     /**
@@ -422,7 +445,8 @@ class Model {
 
 // Do not run npm test with this not commented out
 // const model = new Model(dbConfig, 'public');
-// const res = await model.lastItem('some table');
+// const res = await model.delete('some_table', {columns: ['salary', 'job'], ops: ['AND']}, (obj) => obj.salary > 5000 && obj.job !== 'seller');
+// const res = await model.get('some_table', null, ['age', 'salary'])
 // console.log(res);
 
 export {Model, dbConfig};
