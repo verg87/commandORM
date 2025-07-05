@@ -10,6 +10,11 @@ const dbConfig = {
     allowExitOnIdle: true, // Change it in the future
 };
 
+const validateSQLName = (...args) => {
+    if (!args.every((arg) => /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(arg))) 
+        throw new Error(`Column/Table names can consist of only upper or lower cased letters, underscores and numbers`);
+}
+
 /**
  * Represents a single database
  */
@@ -32,14 +37,10 @@ class Model {
 
             try {
                 return await fn(...args, client);
-            } catch (err) {
-                console.log(err);
-                process.exit(-1);
             } finally {
                 client.release();
             }
         }
-        
     }
 
     /**
@@ -118,9 +119,7 @@ class Model {
             const keysArray = Object.keys(values);
             const valuesArray = Object.values(values);
 
-            if (keysArray.some((columnName) => !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(columnName))) {
-                throw new Error(`Column names can consist of only upper or lower cased letters, underscores and numbers`);
-            }
+            validateSQLName(table_name, ...keysArray);
 
             const schemaData = await this.getSchemaData(table_name);
             const columnNames = schemaData.map((columnData) => columnData['column_name']);
@@ -168,12 +167,12 @@ class Model {
             const { name, type, length, precision, scale, defaultValue, nullable } = columnData;
             const columnNames = schemaData.map((columnData) => columnData['column_name']);
 
+            validateSQLName(table_name, name);
+
             let sqlType = ``;
 
             if (columnNames.includes(name)) {
                 throw new Error(`Duplicate column name: ${name}`);
-            } else if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name)) {
-                throw new Error(`Invalid column name: ${name}`);
             }
 
             sqlType = (() => {
@@ -212,12 +211,12 @@ class Model {
      */
     async createTable(table_name) {
         await this.decorator(async (table_name, client) => {
+            validateSQLName(table_name);
+
             const exists = await this.exists(table_name);
 
             if (exists) 
                 throw new Error(`table "${table_name}" already exists`);
-            else if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(table_name)) 
-                throw new Error(`Table names can consist of only upper or lower cased letters, underscores and numbers`);
             
             const sql = format(`CREATE TABLE %I ();`, table_name);
 
@@ -252,13 +251,12 @@ class Model {
      */
     async countRows(table_name) {
         return await this.decorator(async (table_name, client) => {
-            if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(table_name)) 
-                throw new Error(`Table names can consist of only upper or lower cased letters, underscores and numbers`);
+            validateSQLName(table_name)
 
             const sql = format(`SELECT COUNT(*) FROM %I`, table_name);
             const { rows } = await client.query(sql);
 
-            return rows[0].count;
+            return parseInt(rows[0].count);
         })(table_name);
     }
 
@@ -269,13 +267,12 @@ class Model {
      */
     async firstItem(table_name) {
         return await this.decorator(async (table_name, client) => {
-            if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(table_name)) 
-                throw new Error(`Table names can consist of only upper or lower cased letters, underscores and numbers`);
+            validateSQLName(table_name);
 
             const sql = format(`SELECT * FROM %I LIMIT 1`, table_name);
             const { rows } = await client.query(sql);
 
-            return rows;
+            return rows[0];
         })(table_name);
     }
 
@@ -285,8 +282,7 @@ class Model {
      * @returns the last row in a given table
      */
     async lastItem(table_name) {
-        if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(table_name)) 
-            throw new Error(`Table names can consist of only upper or lower cased letters, underscores and numbers`);
+        validateSQLName(table_name);
 
         const hasPrimaryKeys = await this.getPrimaryKeys(table_name);
         let obj;
@@ -317,13 +313,13 @@ class Model {
      */
     async delete(table_name, column, condition) {
         await this.decorator(async (table_name, column, condition, client) => {
-            if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(column)) throw new Error(`Column names can consist of only upper or lower cased letters, underscores and numbers`);
+            validateSQLName(table_name, column);
 
             const selectedByCondition = await this.get(table_name, condition);
             const valuesToDelete = selectedByCondition.map((obj) => obj[column]);
 
             let operation;
-
+            // ! Fix, method limeted to only one column
             if (valuesToDelete.every((value) => value === null)) {
                 operation = `IS NULL`;
             } else if (valuesToDelete.some((value) => value === null)) {
@@ -346,9 +342,7 @@ class Model {
      */
     async deleteColumn(table_name, column) {
         await this.decorator(async (table_name, column, client) => {
-            if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(column)) {
-                throw new Error(`Column names can consist of only upper or lower cased letters, underscores and numbers`);
-            }
+            validateSQLName(table_name, column);
 
             const sql = format(`ALTER TABLE %I DROP COLUMN %I;`, table_name, column);
 
@@ -362,7 +356,9 @@ class Model {
      */
     async deleteTable(table_name) {
         await this.decorator(async (table_name, client) => {
-            const sql = format(`DROP TABLE %I`, table_name)
+            validateSQLName(table_name);
+
+            const sql = format(`DROP TABLE %I`, table_name);
 
             await client.query(sql);
         })(table_name);
@@ -399,12 +395,15 @@ class Model {
                     if (['OR', 'AND'].includes(key) && data === null) {
                         return format(` %s `, key);
                     } else if (
-                        (['string', 'number'].includes(typeof value) || Array.isArray(value)) && 
+                        (['string', 'number', 'object'].includes(typeof value) || Array.isArray(value)) && 
                         typeof data === 'object' && typeof key === 'string' && typeof op === 'string' &&
                         operators.includes(op)
                     ) {
+                        // ! Fix bc 'age = null' not correct syntax
                         if (Array.isArray(value)) {
                             return format(`%I IN (%L)`, key, value);
+                        } else if (value === null) {
+                            return format(`%I IS NULL`, key);
                         }
     
                         return format(`%I %s %L`, key, op, value);
@@ -423,7 +422,7 @@ class Model {
 
 // Do not run npm test with this not commented out
 // const model = new Model(dbConfig, 'public');
-// const res = await model.lastItem('some_table');
+// const res = await model.lastItem('some table');
 // console.log(res);
 
 export {Model, dbConfig};
