@@ -422,7 +422,6 @@ class Model {
                         typeof data === 'object' && typeof key === 'string' && typeof op === 'string' &&
                         operators.includes(op)
                     ) {
-                        // ! Fix bc 'age = null' not correct syntax
                         if (Array.isArray(value)) {
                             return format(`%I IN (%L)`, key, value);
                         } else if (value === null) {
@@ -445,7 +444,10 @@ class Model {
 
 // Do not run npm test with this not commented out
 // const model = new Model(dbConfig, 'public');
-// const res = await model.delete('some_table', {columns: ['salary', 'job'], ops: ['AND']}, (obj) => obj.salary > 5000 && obj.job !== 'seller');
+
+// examples:
+// await model.delete('some_table', {columns: ['salary', 'job'], ops: ['AND']}, (obj) => obj.salary > 5000 && obj.job !== 'seller');
+// await model.update('some_table', {name: 'new name'}, {job: {value: 'janitor'}, op: '='}, AND: null, salary: {value: 5000, op: '<'});
 // const res = await model.get('some_table', null, ['age', 'salary'])
 // console.log(res);
 
