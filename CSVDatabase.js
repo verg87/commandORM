@@ -178,7 +178,7 @@ class QueryBuilder {
                 });
                 return newRow;
             });
-        } else if (this._returning.length) {
+        } else if (this._returning.length && this._returning[0] === '*') {
             return values;
         }
     }
@@ -203,28 +203,26 @@ class QueryBuilder {
 
         await this.database.updateTable(this.tableName, condition, values);
 
-        if (this._returning.length) {
-            if (!this._returning.includes('*')) {
-                return rowsToUpdate.map(row => {
-                    const newRow = {};
-                    this._returning.forEach(column => {
-                        if (Object.hasOwn(row, column)) {
-                            newRow[column] = row[column];
-                        }
-                    });
-                    return newRow;
+        if (!this._returning.includes('*')) {
+            return rowsToUpdate.map(row => {
+                const newRow = {};
+                this._returning.forEach(column => {
+                    if (Object.hasOwn(row, column)) {
+                        newRow[column] = row[column];
+                    }
                 });
-            } else {
-                return rowsToUpdate;
-            }
+                return newRow;
+            });
+        } else if (this._returning[0] === '*') {
+            return rowsToUpdate;
         }
     }
 
     /**
      * Adds a column to the table.
-     * @returns {Promise<void>}b
+     * @returns {Promise<void>}
      */
-    async addColumn() {
+    async addColumns() {
         if (this._alter.length === 1 && this._alter[0] === '*')
             throw new Error(`User didn't specify what columns to add`)
 
@@ -233,9 +231,9 @@ class QueryBuilder {
 
     /**
      * Deletes a column from the table.
-     * @returns {Promise<void>}b
+     * @returns {Promise<void>}
      */
-    async deleteColumn() {
+    async removeColumns() {
         if (this._alter.length === 1 && this._alter[0] === '*') {
             const columns = await this.database.getColumns(this.tableName);
             await this.database.deleteColumns(this.tableName, columns);
@@ -270,14 +268,6 @@ class QueryBuilder {
         const data = await this.get();
         return data[data.length - 1];
     }
-
-    /**
-     * Removes the table from the database.
-     * @returns {Promise<void>}b
-     */
-    async remove() {
-        await fs.promises.rm(this.database.databasePath + this.tableName);
-    }
 }
 
 class CSVDatabase {
@@ -285,7 +275,7 @@ class CSVDatabase {
      * @param {string} folderPath The path to the database folder.
      */
     constructor(folderPath) {
-        this.databasePath = folderPath;
+        this.databasePath = /\/$/.test(folderPath) ? folderPath : folderPath + '/';
     }
 
     /**
@@ -304,8 +294,26 @@ class CSVDatabase {
      * Returns the list of all tables in a database
      * @returns An array of strings
      */
-    listTables() {
-        return fs.readdirSync(this.databasePath);
+    async listTables() {
+        return await fs.promises.readdir(this.databasePath);
+    }
+
+    /**
+     * Creates a new file.
+     * @param {string} tableName the name of the table
+     */
+    async createTable(tableName) {
+        await fs.promises.writeFile(
+            `${this.databasePath}${tableName}.csv`, '', 'utf-8'
+        );
+    }
+
+    /**
+     * Removes the table from the database.
+     * @returns {Promise<void>}
+     */
+    async deleteTable(tableName) {
+        await fs.promises.rm(this.databasePath + tableName + '.csv');
     }
 
     /**
@@ -368,10 +376,10 @@ class CSVDatabase {
      * Appends columns to the table.
      * @param {string} tablePath The path to the table.
      * @param {Array<string>|string} columns The columns to append.
-     * @returns {Promise<void>}b
+     * @returns {Promise<void>}
      */
     async appendColumns(tablePath, columns) {
-        const allColumns = await this.getColumns(tablePath);
+        const allColumns = await this.getColumns(tablePath) || [];
         columns = Array.isArray(columns) ? columns : [columns];
         if (columns.some((col) => allColumns.includes(col)))
             throw new Error(`Some of the provided columns already exist in the "${tablePath}" table.
@@ -388,10 +396,10 @@ class CSVDatabase {
      * Deletes columns from the table.
      * @param {string} tablePath The path to the table.
      * @param {Array<string>|string} columns The columns to delete.
-     * @returns {Promise<void>}b
+     * @returns {Promise<void>}
      */
     async deleteColumns(tablePath, columns) {
-        const allColumns = await this.getColumns(tablePath);
+        const allColumns = await this.getColumns(tablePath) || [];
         columns = Array.isArray(columns) ? columns : [columns];
         if (!columns.every((col) => allColumns.includes(col))) 
             throw new Error(`Provided columns: ${columns}, existing columns: ${allColumns}`);
@@ -408,7 +416,7 @@ class CSVDatabase {
      * @param {string} tablePath The path to the table.
      * @param {Function(object): boolean} condition A function to filter the rows that should be updated.
      * @param {object} data The data to update.
-     * @returns {Promise<void>}b
+     * @returns {Promise<void>}
      */
     async updateTable(tablePath, condition, data) {
         const allRows = await this.readTable(tablePath);
@@ -429,24 +437,24 @@ class CSVDatabase {
     }
 }
 
-const db = new CSVDatabase('./DB/');
-
-// db.deleteColumns('index.csv', ['gpa'])
+// const db = new CSVDatabase('./DB/');
 
 async function main() {
     const results = await db
         .table('index.csv')
         .returning()
         // .alter()
-        // .addColumn();
+        // .addColumns();
         .select('First Name', 'Age')
         .where(row => row.Age < 30 || row['Last Name'] === 'Volnito')
         // .orderBy('First Name')
         // .descending()
         // .update({'First Name': "Doe"});
-        // .get();
+        .get();
 
     console.log(results);
 }
 
 // main();
+
+export {CSVDatabase, QueryBuilder};
