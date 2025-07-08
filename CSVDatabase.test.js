@@ -87,7 +87,7 @@ describe(`QueryBuilder tests`, () => {
             await db.table('tests.csv')
                 .insert(data);
 
-            const tableContents = await db.table('tests.csv').get();
+            const tableContents = await db.table('tests.csv').select().get();
 
             expect(tableContents).toStrictEqual(data);
         });
@@ -100,11 +100,11 @@ describe(`QueryBuilder tests`, () => {
         });
 
         test(`User provided empty values argument`, async () => {
-            const tableContentsBefore = await db.table('tests.csv').get();
+            const tableContentsBefore = await db.table('tests.csv').select().get();
 
             await db.table('tests.csv').insert([]);
 
-            const tableContentsAfter = await db.table('tests.csv').get();
+            const tableContentsAfter = await db.table('tests.csv').select().get();
 
             expect(tableContentsBefore).toStrictEqual(tableContentsAfter);
         });
@@ -116,7 +116,7 @@ describe(`QueryBuilder tests`, () => {
                 .returning()
                 .insert(data);
 
-            const tableContents = await db.table('tests.csv').get();
+            const tableContents = await db.table('tests.csv').select().get();
 
             expect(tableContents).toContainEqual(data);
             expect(returned[0]).toStrictEqual(data);
@@ -139,13 +139,13 @@ describe(`QueryBuilder tests`, () => {
 
     describe(`Update method tests`, () => {
         test(`Update a row`, async () => {
-            const tableContentsBefore = await db.table('tests.csv').get();
+            const tableContentsBefore = await db.table('tests.csv').select().get();
 
             await db.table('tests.csv')
                 .where(row => parseInt(row.salary) < 4600)
                 .update({salary: '4250'});
 
-            const tableContentsAfter = await db.table('tests.csv').get();
+            const tableContentsAfter = await db.table('tests.csv').select().get();
             
             expect(tableContentsBefore.every(row => row.salary !== '4250')).toBe(true);
             expect(tableContentsAfter.every(row => ['4250', '5000', '5100'].includes(row.salary))).toBe(true);
@@ -199,6 +199,7 @@ describe(`QueryBuilder tests`, () => {
 
         test(`Get with where`, async () => {
             const tableContents = await db.table('tests.csv')
+                .select()
                 .where(row => parseInt(row.salary) < 5000)
                 .get();
 
@@ -210,6 +211,7 @@ describe(`QueryBuilder tests`, () => {
 
         test(`Get with order`, async () => {
             const tableContents = await db.table('tests.csv')
+                .select()
                 .orderBy('first_name')
                 .get();
 
@@ -220,7 +222,7 @@ describe(`QueryBuilder tests`, () => {
         });
 
         test(`Get with descending`, async () => {
-            const tableContents = await db.table('tests.csv').descending().get();
+            const tableContents = await db.table('tests.csv').select().desc().get();
             const expected = (await db.readTable('tests.csv')).reverse();
 
             expect(tableContents).toStrictEqual(expected);
@@ -229,14 +231,14 @@ describe(`QueryBuilder tests`, () => {
 
     describe(`Utility methods tests`, () => {
         test(`Count rows`, async () => {
-            const rows = await db.table('tests.csv').count();
+            const rows = await db.table('tests.csv').select().count();
             const expected = (await db.readTable('tests.csv')).length;
 
             expect(rows).toBe(expected);
         });
 
         test(`Get the first row in the table`, async () => {
-            const first = await db.table('tests.csv').first();
+            const first = await db.table('tests.csv').select().first();
             const expected = (await db.readTable('tests.csv'))[0];
 
             expect(first).toStrictEqual(expected);
@@ -244,7 +246,7 @@ describe(`QueryBuilder tests`, () => {
 
         test(`Get the last row in the table`, async () => {
             // Get the person with the lowest salary
-            const last = await db.table('tests.csv').orderBy('salary').descending().last();
+            const last = await db.table('tests.csv').orderBy('salary').desc().last();
             const expected = (await db.readTable('tests.csv'))
                 .sort((a, b) => parseInt(a.salary) - parseInt(b.salary))[0];
 
@@ -254,7 +256,7 @@ describe(`QueryBuilder tests`, () => {
 
     describe(`Delete method tests`, () => {
         test(`Delete a row`, async () => {
-            const deletedGinto = await db.table('tests.csv').where(row => row.last_name === 'Ginto').get();
+            const deletedGinto = await db.table('tests.csv').select().where(row => row.last_name === 'Ginto').get();
             await db.table('tests.csv')
                 .where(row => row.last_name === 'Ginto')
                 .delete();
@@ -289,7 +291,7 @@ describe(`QueryBuilder tests`, () => {
         test(`Delete all rows`, async () => {
             await db.table('tests.csv').delete();
 
-            const tableContents = await db.table('tests.csv').get();
+            const tableContents = await db.table('tests.csv').select().get();
 
             expect(tableContents).toStrictEqual([]);
         });

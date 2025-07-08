@@ -1,80 +1,17 @@
 import fs from 'node:fs';
 import { parse } from 'csv-parse/sync';
 import { stringify } from 'csv-stringify/sync';
+import { QueryBuilder } from './queryBuilder.js';
 
-class QueryBuilder {
+class CSVQueryBuilder extends QueryBuilder {
     /**
      * @param {string} tableName The name of the table.
      * @param {CSVDatabase} database The database instance.
      */
     constructor(tableName, database) {
+        super();
         this.tableName = tableName;
         this.database = database;
-        this._select = ['*'];
-        this._where = [];
-        this._order = [];
-        this._desc = false;
-        this._returning = [];
-        this._alter = ['*'];
-    }
-
-    /**
-     * Specifies the columns to select.
-     * @param  {...string} columns The columns to select.
-     * @returns {QueryBuilder} The QueryBuilder instance.
-     */
-    select(...columns) {
-        this._select = columns?.length > 0 ? columns : ['*'];
-        return this;
-    }
-
-    /**
-     * Adds a where clause to the query.
-     * @param {Function(object): boolean} condition A function to filter the rows.
-     * @returns {QueryBuilder} The QueryBuilder instance.
-     */
-    where(condition) {
-        this._where.push(condition);
-        return this;
-    }
-
-    /**
-     * Specifies the columns to return.
-     * @param  {...string} columns The columns to return.
-     * @returns {QueryBuilder} The QueryBuilder instance.
-     */
-    returning(...columns) {
-        this._returning = columns?.length > 0 ? columns : ['*'];
-        return this;
-    }
-
-    /**
-     * Specifies the columns to order by.
-     * @param  {...string} columns The columns to order by.
-     * @returns {QueryBuilder} The QueryBuilder instance.
-     */
-    orderBy(...columns) {
-        this._order = columns?.length > 0 ? columns : [];
-        return this;
-    }
-
-    /**
-     * Specifies that the order should be descending.
-     * @returns {QueryBuilder} The QueryBuilder instance.
-     */
-    descending() {
-        this._desc = true;
-        return this;
-    }
-
-    /**
-     * Specifies the columns to alter.
-     * @param  {...string} columns The columns to alter.
-     * @returns {QueryBuilder} The QueryBuilder instance.
-     */
-    alter(...columns) {
-        this._alter = columns?.length ? columns : ['*'];
-        return this;
     }
 
     /**
@@ -279,13 +216,13 @@ class CSVDatabase {
     /**
      * Creates a new query builder for a table.
      * @param {string} tableName The name of the table.
-     * @returns {QueryBuilder} A new QueryBuilder instance.
+     * @returns {CSVQueryBuilder} A new CSVQueryBuilder instance.
      */
     table(tableName) {
         if (tableName.includes('..')) {
             throw new Error('Invalid table name');
         }
-        return new QueryBuilder(tableName, this);
+        return new CSVQueryBuilder(tableName, this);
     }
 
     /**
@@ -438,5 +375,7 @@ class CSVDatabase {
 }
 
 // const db = new CSVDatabase('./DB/');
+// const res = await db.table('index.csv').desc().get();
+// console.log(res);
 
-export {CSVDatabase, QueryBuilder};
+export {CSVDatabase, CSVQueryBuilder};

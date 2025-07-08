@@ -1,5 +1,6 @@
 import { Pool } from 'pg';
 import format from 'pg-format';
+import { QueryBuilder } from './queryBuilder.js';
 
 const dbConfig = {
     user: 'postgres',
@@ -8,6 +9,7 @@ const dbConfig = {
     password: process.env['POSTGRES_PASSWORD'],
     port: process.env['PORT'], // Set it to your own port
     allowExitOnIdle: true, // Change it in the future
+    _schemaName: 'public',
 };
 
 const validateSQLName = (...args) => {
@@ -15,13 +17,196 @@ const validateSQLName = (...args) => {
         throw new Error(`Column/Table names can consist of only upper or lower cased letters, underscores and numbers`);
 }
 
+
+class ModelQueryBuilder extends QueryBuilder {
+    constructor(config) {
+        super();
+        this.pool = new Pool(config);
+        this.schemaName = config._schemaName;
+        this.tableName = ``;
+        this.sql = {select: '', order: '', limit: ''};       
+    }
+
+    /** 
+     * Wrapper method to remove the constant try and finally blocks
+     * @param {function} fn The asynchronous model method to be decorated.                                                                                                                     │
+     * It will receive a `client` object as its last argument.                                                                                                                                 │
+     * @returns {function} An asynchronous function that, when called, will                                                                                                                    │
+     * execute the decorated method with a connected database client.    
+     */
+    decorator(fn) {
+        return async (...args) => {
+            const client = await this.pool.connect();
+
+            try {
+                return await fn(...args, client);
+            } finally {
+                client.release();
+            }
+        }
+    }
+
+    /**
+     * Retrieves the schema information for a given table.
+     * @param {string} tableName The name of the table.
+     * @returns {Promise<Array<object>>} A promise that resolves to an array of objects,
+     * each representing a column in the table. Each object contains `column_name`,
+     * `column_default`, `is_nullable`, and `data_type`.
+     */
+    async getSchemaData(tableName) {
+        return await this.decorator(async (tableName, client) => {
+            const query = `
+                SELECT column_name, column_default, is_nullable, data_type
+                FROM information_schema.columns
+                WHERE table_schema=$1
+                AND table_name=$2;
+            `;
+
+            const { rows } = await client.query(query, [this.schemaName, tableName]);
+
+            return rows;
+        })(tableName);
+    }
+
+    async exists(tableName) {
+        return await this.decorator(async (tableName, client) => {
+            const sql = `
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_schema = $1
+                    AND table_name = $2
+                );
+            `;
+
+            const { rows } = await client.query(sql, [this.schemaName, tableName]);
+            return rows[0].exists;
+        })(tableName);
+    }
+
+    async checkForTable() {
+        if (!this.tableName)
+            throw new Error(`Table haven't been chosen`);
+        else if (!(await this.exists(this.tableName)))
+            throw new Error(`The "${this.tableName}" table doesn't exist in the database`);
+    }
+
+    table(tableName) {
+        validateSQLName(tableName);
+
+        this.tableName = tableName;
+        return this;
+    }
+
+    select(...columns) {
+        this._select = columns?.length ? columns.filter(col => col !== '*') : ['*'];
+        this.sql.select = format(`SELECT %s FROM %I`, this._select, this.tableName);
+        return this;
+    }
+
+    orderBy(...columns) {
+        this._order = columns?.length ? columns.filter(col => col !== '*') : ['*'];
+        this.sql.order = format(`ORDER BY %s`, this._order);
+        return this;
+    }
+
+    desc() {
+        this._desc = true;
+        return this;
+    }
+
+    limit(number) {
+        this.sql.limit = format(`LIMIT %s`, number);
+        return this;
+    }
+
+    // with this code structure async methods should be only at the end of the method chain.
+    async get() {
+        return await this.decorator(async (client) => {
+            await this.checkForTable();
+            if (!this._select.length)
+                throw new Error(`Columns haven't been selected`);
+
+            const schemaData = await this.getSchemaData(this.tableName);
+            const columns = schemaData.map(row => row.column_name);
+
+            if (!this._select.every((col) => columns.includes(col)) && this._select[0] !== '*')
+                throw new Error(`Some of the selected columns don't exist in the "${this.tableName}" table`);
+
+            const sql = Object.values(this.sql)
+                .filter((value) => value)
+                .join(' ')
+                .trim() + ';';
+
+            const condition = this._where.length ? (row) => this._where.every(cond => cond(row)) : () => true;
+            const res = (await client.query(sql)).rows.filter(condition);
+
+            if (this._desc)
+                res.reverse();
+
+            return res;
+        })();
+    }
+
+    async delete() {
+        return await this.decorator(async (client) => {
+            await this.checkForTable();
+            if (!this._alter.length)
+                throw new Error(`User didn't provide columns to delete`);
+
+            const schemaData = await this.getSchemaData(this.tableName);
+            const columns = schemaData.map(row => row.column_name);
+
+            if (!this._alter.every((col) => columns.includes(col)) && this._alter[0] !== '*')
+                throw new Error(`Some of the chosen columns don't exist in the "${this.tableName}" table`);
+
+            const qb = new ModelQueryBuilder(dbConfig);
+            qb.table(this.tableName).select();
+            if (this._where) {
+                for (const cond of this._where) {
+                    qb.where(cond);
+                }
+            }
+            const selectedByCondition = await qb.get();
+
+            const sqlStrings = columns.reduce((acc, col) => {
+                const valuesToDeleteSet = new Set(selectedByCondition.map((obj) => obj[col]));
+                const valuesToDelete = [...valuesToDeleteSet];
+
+                if (valuesToDelete.every((value) => value === null)) {
+                    acc.push(format(`%I IS NULL`, col));
+                } else if (valuesToDelete.some((value) => value === null)) {
+                    acc.push(format(`%1$I IS NULL OR %1$I IN (%L)`, col, 
+                        valuesToDelete.filter((value) => value !== null)));
+                } else {
+                    acc.push(format(`%I IN (%L)`, col, valuesToDelete));
+                } 
+                
+                return acc;
+            }, []);
+            
+            const operation = ops.reduce((acc, op, idx) => {
+                if (sqlStrings[idx] && sqlStrings[idx + 1]) {
+                    acc = sqlStrings[idx] + ` ${op} ` + sqlStrings[idx + 1];
+                    return acc;
+                }
+
+                return acc;
+            }, '') || sqlStrings[0];
+        })();
+    }
+}
+
+const md = new ModelQueryBuilder(dbConfig);
+const res = await md.table('some_table').alter().where(row => row.age < 40).delete();
+console.log(res);
+
 /**
  * Represents a single database
  */
 class Model {
     constructor(config, schemaName) {
         this.pool = new Pool(config);
-        this.schema = schemaName;
+        this.schema = config._schemaName;
     }
 
     /** 
@@ -443,12 +628,12 @@ class Model {
 }
 
 // Do not run npm test with this not commented out
-// const model = new Model(dbConfig, 'public');
+// const model = new Model(dbConfig);
 
 // examples:
 // await model.delete('some_table', {columns: ['salary', 'job'], ops: ['AND']}, (obj) => obj.salary > 5000 && obj.job !== 'seller');
 // await model.update('some_table', {name: 'new name'}, {job: {value: 'janitor'}, op: '='}, AND: null, salary: {value: 5000, op: '<'});
-// const res = await model.get('some_table', null, ['age', 'salary'])
+// const res = await model.getSchemaData('some_table', null, ['age', 'salary'])
 // console.log(res);
 
 export {Model, dbConfig};
