@@ -14,7 +14,7 @@ class QueryBuilder {
         this._where = [];
         this._order = [];
         this._desc = false;
-        this._returning = ['*'];
+        this._returning = [];
         this._alter = ['*'];
     }
 
@@ -138,20 +138,18 @@ class QueryBuilder {
 
         await this.database.deleteRows(this.tableName, condition);
         
-        if (this._returning.length) {
-            if (!this._returning.includes('*')) {
-                return rowsToDelete.map(row => {
-                    const newRow = {};
-                    this._returning.forEach(column => {
-                        if (Object.hasOwn(row, column)) {
-                            newRow[column] = row[column];
-                        }
-                    });
-                    return newRow;
+        if (this._returning.length && !this._returning.includes('*')) {
+            return rowsToDelete.map(row => {
+                const newRow = {};
+                this._returning.forEach(column => {
+                    if (Object.hasOwn(row, column)) {
+                        newRow[column] = row[column];
+                    }
                 });
-            } else {
-                return rowsToDelete;
-            }
+                return newRow;
+            });
+        } else if (this._returning[0] === '*') {
+            return rowsToDelete;
         }
     }
 
@@ -178,7 +176,7 @@ class QueryBuilder {
                 });
                 return newRow;
             });
-        } else if (this._returning.length && this._returning[0] === '*') {
+        } else if (this._returning[0] === '*') {
             return values;
         }
     }
@@ -203,7 +201,7 @@ class QueryBuilder {
 
         await this.database.updateTable(this.tableName, condition, values);
 
-        if (!this._returning.includes('*')) {
+        if (this._returning.length && !this._returning.includes('*')) {
             return rowsToUpdate.map(row => {
                 const newRow = {};
                 this._returning.forEach(column => {
@@ -426,8 +424,10 @@ class CSVDatabase {
             throw new Error(`Some of the provided columns don't exist in the "${tablePath}" table`);
         
         const updatedRows = allRows.map(row => {
-            if (condition(row)) {
+            if (condition && condition(row)) {
                 return { ...row, ...data };
+            } else if (!condition) {
+                return {...row, ...data};
             }
             return row;
         });
@@ -438,23 +438,5 @@ class CSVDatabase {
 }
 
 // const db = new CSVDatabase('./DB/');
-
-async function main() {
-    const results = await db
-        .table('index.csv')
-        .returning()
-        // .alter()
-        // .addColumns();
-        .select('First Name', 'Age')
-        .where(row => row.Age < 30 || row['Last Name'] === 'Volnito')
-        // .orderBy('First Name')
-        // .descending()
-        // .update({'First Name': "Doe"});
-        .get();
-
-    console.log(results);
-}
-
-// main();
 
 export {CSVDatabase, QueryBuilder};
