@@ -2,7 +2,6 @@ export class QueryBuilder {
     constructor() {
         this._select = [];
         this._order = [];
-        this._returning = [];
         this._desc = false;
         this._alter = [];
     }
@@ -62,7 +61,7 @@ export class QueryBuilder {
      * @returns {QueryBuilder} The QueryBuilder instance.
      */
     alter(...columns) {
-        this._alter = columns?.length ? columns : ['*'];
+        this._alter = columns?.length ? columns.filter(v => v !== '*') : ['*'];
         return this;
     }
 }

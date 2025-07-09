@@ -1,4 +1,4 @@
-import { Pool } from 'pg';
+import { escapeLiteral, Pool } from 'pg';
 import format from 'pg-format';
 import { QueryBuilder } from './queryBuilder.js';
 
@@ -19,12 +19,15 @@ const validateSQLName = (...args) => {
 
 
 class ModelQueryBuilder extends QueryBuilder {
+    /**
+     * @param {object} config The database configuration object.
+     */
     constructor(config) {
         super();
         this.pool = new Pool(config);
         this.schemaName = config._schemaName;
         this.tableName = ``;
-        this.sql = {delete: '', select: '', where: '', order: '', limit: ''};   
+        this.sql = {delete: '', select: '', where: '', order: '', limit: '', returning: ''};   
     }
 
     /** 
@@ -44,6 +47,28 @@ class ModelQueryBuilder extends QueryBuilder {
                 client.release();
             }
         }
+    }
+
+    /**
+     * Retrieves primary keys for a given table.
+     * @param {string} tableName the name of the table
+     * @returns An array with objects inside. Each object represents one primary key and their type
+     */
+    async getPrimaryKeys(tableName) {
+        return await this.decorator(async (tableName, client) => {
+            const sql = `
+                SELECT c.column_name, c.data_type
+                FROM information_schema.table_constraints tc 
+                JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_name) 
+                JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema
+                AND tc.table_name = c.table_name AND ccu.column_name = c.column_name
+                WHERE constraint_type = 'PRIMARY KEY' and tc.table_name = $1;
+            `;
+
+            const { rows } = await client.query(sql, [tableName]);
+
+            return rows;
+        })(tableName);
     }
 
     /**
@@ -68,6 +93,11 @@ class ModelQueryBuilder extends QueryBuilder {
         })(tableName);
     }
 
+    /**
+     * Checks if a table with the given name exists in the database.
+     * @param {string} tableName The name of the table to check.
+     * @returns {Promise<boolean>} A promise that resolves to true if the table exists, false otherwise.
+     */
     async exists(tableName) {
         return await this.decorator(async (tableName, client) => {
             const sql = `
@@ -83,6 +113,12 @@ class ModelQueryBuilder extends QueryBuilder {
         })(tableName);
     }
 
+    /**
+     * Checks if a table has been selected and if it exists in the database.
+     * @throws {Error} If no table has been selected.
+     * @throws {Error} If the selected table does not exist.
+     */
+    // Istead check if table in the database list
     async checkForTable() {
         if (!this.tableName)
             throw new Error(`Table haven't been chosen`);
@@ -90,6 +126,52 @@ class ModelQueryBuilder extends QueryBuilder {
             throw new Error(`The "${this.tableName}" table doesn't exist in the database`);
     }
 
+    /**
+     * Creates a new table in the database.
+     * @param {string} tableName The name of the table to create.
+     * @throws {Error} If the table already exists.
+     * @throws {Error} If table name isn't valid.
+     */
+    async createTable(tableName) {
+        await this.decorator(async (tableName, client) => {
+            if (this.tableName)
+                throw new Error(`Can't create a table when you chose one with "table" method`);
+            else if ((await this.exists(tableName)))
+                throw new Error(`The "${tableName}" table already exists`);
+            
+            validateSQLName(tableName);
+
+            // add creating tables with values
+            const sql = format(`CREATE TABLE %I ()`, tableName);
+
+            await client.query(sql);
+        })(tableName);
+    }
+
+    /**
+     * Deletes a table from the database.
+     * @param {string} tableName The name of the table to delete.
+     */
+    async deleteTable(tableName) {
+        await this.decorator(async (tableName, client) => {
+            if (this.tableName)
+                throw new Error(`Can't create a table when you chose one with "table" method`);
+            else if (!(await this.exists(tableName)))
+                throw new Error(`The "${tableName}" table doesn't exist`);
+            
+            validateSQLName(tableName);
+
+            const sql = format(`DROP TABLE %I`, tableName);
+
+            await client.query(sql);
+        })(tableName);
+    }
+
+    /**
+     * Sets the table to be used for the query.
+     * @param {string} tableName The name of the table.
+     * @returns {ModelQueryBuilder} The current instance of the ModelQueryBuilder.
+     */
     table(tableName) {
         validateSQLName(tableName);
 
@@ -97,12 +179,22 @@ class ModelQueryBuilder extends QueryBuilder {
         return this;
     }
 
+    /**
+     * Specifies the columns to be selected.
+     * @param {...string} columns The columns to select. If no columns are provided, all columns are selected.
+     * @returns {ModelQueryBuilder} The current instance of the ModelQueryBuilder.
+     */
     select(...columns) {
         this._select = columns?.length ? columns.filter(col => col !== '*') : ['*'];
         this.sql.select = format(`SELECT %s FROM %I`, this._select, this.tableName);
         return this;
     }
 
+    /**
+     * Adds a WHERE clause to the query.
+     * @param {...any} args The arguments for the WHERE clause.
+     * @returns {ModelQueryBuilder} The current instance of the ModelQueryBuilder.
+     */
     // Rewrites the where property. To add a where clause use "or" or "and" methods
     where(...args) {
         const operators = ['=', '!=', '<>', '>=', '<=', '<', '>'];
@@ -116,11 +208,19 @@ class ModelQueryBuilder extends QueryBuilder {
             && args.length === 2
         ) {
             this.sql.where = format(`WHERE %I = %L`, args[0].trim(), args[1]);
+        } else if (typeof args[0] === 'string' && args[1] === null && args.length === 2) {
+            this.sql.where = format(`WHERE %I IS NULL`, args[0]);
         }
 
         return this;
     }
 
+    /**
+     * Adds an OR condition to the WHERE clause.
+     * @param {...any} args The arguments for the OR condition.
+     * @returns {ModelQueryBuilder} The current instance of the ModelQueryBuilder.
+     * @throws {Error} If the `where` method has not been called first.
+     */
     or(...args) {
         if (!this.sql.where)
             throw new Error(`You can't call "or" method without first calling where method`);
@@ -133,6 +233,12 @@ class ModelQueryBuilder extends QueryBuilder {
         return this;
     }
 
+    /**
+     * Adds an AND condition to the WHERE clause.
+     * @param {...any} args The arguments for the AND condition.
+     * @returns {ModelQueryBuilder} The current instance of the ModelQueryBuilder.
+     * @throws {Error} If the `where` method has not been called first.
+     */
     and(...args) {
         if (!this.sql.where)
             throw new Error(`You can't call "and" method without first calling where method`);
@@ -145,27 +251,56 @@ class ModelQueryBuilder extends QueryBuilder {
         return this;
     }
 
+    /**
+     * Specifies the columns to be returned by the query.
+     * @param {...string} columns The columns to return.
+     * @returns {ModelQueryBuilder} The current instance of the ModelQueryBuilder.
+     */
+    returning(...columns) {
+        this.sql.returning = format(`RETURNING %s`, columns);
+        return this;
+    }
+
+    /**
+     * Specifies the columns to order the results by.
+     * @param {...string} columns The columns to order by.
+     * @returns {ModelQueryBuilder} The current instance of the ModelQueryBuilder.
+     */
     orderBy(...columns) {
         this._order = columns?.length ? columns.filter(col => col !== '*') : ['*'];
         this.sql.order = format(`ORDER BY %s`, this._order);
         return this;
     }
 
+    /**
+     * Sets the order to descending.
+     * @returns {ModelQueryBuilder} The current instance of the ModelQueryBuilder.
+     */
     desc() {
         this._desc = true;
         return this;
     }
 
+    /**
+     * Limits the number of rows returned by the query.
+     * @param {number} number The maximum number of rows to return.
+     * @returns {ModelQueryBuilder} The current instance of the ModelQueryBuilder.
+     */
     limit(number) {
         this.sql.limit = format(`LIMIT %s`, number);
         return this;
     }
 
-    // with this code structure async methods should be only at the end of the method chain.
+    /**
+     * Executes the select query and returns the results.
+     * @returns {Promise<Array<object>>} A promise that resolves to an array of objects, where each object is a row from the database.
+     * @throws {Error} If no columns have been selected.
+     * @throws {Error} If any of the selected columns do not exist in the table.
+     */
     async get() {
         return await this.decorator(async (client) => {
             await this.checkForTable();
-            if (!this._select.length)
+            if (!this.sql.select)
                 throw new Error(`Columns haven't been selected`);
 
             const schemaData = await this.getSchemaData(this.tableName);
@@ -188,172 +323,82 @@ class ModelQueryBuilder extends QueryBuilder {
         })();
     }
 
-    // Deletes rows
+    /**
+     * Deletes rows from the table.
+     * @returns {Promise<Array<object>>} A promise that resolves to an array of the deleted rows.
+     */
     async delete() {
         return await this.decorator(async (client) => {
             await this.checkForTable();
 
-            let rows;
-            const { where } = this.sql;
-            const sql = format(`DELETE FROM %I %s;`, this.tableName, where);
+            const { where, returning } = this.sql;
+            const sql = format(`DELETE FROM %I %s %s;`, this.tableName, where, returning);
 
-            if (this._returning.length && this._returning.includes('*')) {
-                const returning = format(`SELECT * FROM %I %s`, this.tableName, where);
-
-                rows = (await client.query(returning)).rows;
-            } else if (this._returning.length && !this._returning.includes('*')) {
-                const returning = format(`SELECT %s FROM %I %s`, this._returning, this.tableName, where);
-
-                rows = (await client.query(returning)).rows;
-            }
-
-            await client.query(sql);
-
-            if (this._returning.length) {
-                return rows;
-            }
+            return (await client.query(sql)).rows;
         })();
     }
-}
-
-const md = new ModelQueryBuilder(dbConfig);
-const res = await md.table('some_table').returning().where('name', 'David').delete();
-console.log(res);
-
-/**
- * Represents a single database
- */
-class Model {
-    constructor(config, schemaName) {
-        this.pool = new Pool(config);
-        this.schema = config._schemaName;
-    }
-
-    /** 
-     * Wrapper method to remove the constant try and catch blocks
-     * @param {function} fn The asynchronous model method to be decorated.                                                                                                                     │
-     * It will receive a `client` object as its last argument.                                                                                                                                 │
-     * @returns {function} An asynchronous function that, when called, will                                                                                                                    │
-     * execute the decorated method with a connected database client.    
-     */
-    decorator(fn) {
-        return async (...args) => {
-            const client = await this.pool.connect();
-
-            try {
-                return await fn(...args, client);
-            } finally {
-                client.release();
-            }
-        }
-    }
 
     /**
-     * Retrieves primary keys for a given table.
-     * @param {string} table_name the name of the table
-     * @returns An array with objects inside. Each object represents one primary key and their type
+     * Inserts one or more rows into the table.
+     * @param {object|Array<object>} values An object or an array of objects representing the rows to insert.
+     * @returns {Promise<Array<object>>} A promise that resolves to an array of the inserted rows.
+     * @throws {Error} If any of the provided columns do not exist in the table.
+     * @throws {Error} If any of the mandatory columns are missing.
      */
-    async getPrimaryKeys(table_name) {
-        return await this.decorator(async (table_name, client) => {
-            const sql = `
-                SELECT c.column_name, c.data_type
-                FROM information_schema.table_constraints tc 
-                JOIN information_schema.constraint_column_usage AS ccu USING (constraint_schema, constraint_name) 
-                JOIN information_schema.columns AS c ON c.table_schema = tc.constraint_schema
-                AND tc.table_name = c.table_name AND ccu.column_name = c.column_name
-                WHERE constraint_type = 'PRIMARY KEY' and tc.table_name = $1;
-            `;
+    async insert(values) {
+        return await this.decorator(async (values, client) => {
+            await this.checkForTable();
 
-            const { rows } = await client.query(sql, [table_name]);
+            const rows = Array.isArray(values) ? values : [values];
 
-            return rows;
-        })(table_name);
-    }
-
-    /**
-     * Retrieves the schema information for a given table.
-     * @param {string} table_name The name of the table.
-     * @returns {Promise<Array<object>>} A promise that resolves to an array of objects,
-     * each representing a column in the table. Each object contains `column_name`,
-     * `column_default`, `is_nullable`, and `data_type`.
-     */
-    async getSchemaData(table_name) {
-        return await this.decorator(async (table_name, client) => {
-            const query = `
-                SELECT column_name, column_default, is_nullable, data_type
-                FROM information_schema.columns
-                WHERE table_schema=$1
-                AND table_name=$2;
-            `;
-
-            const { rows } = await client.query(query, [this.schema, table_name]);
-
-            return rows;
-        })(table_name);
-    }
-
-    /**
-     * Checks whether the table already exists or not.
-     * @param {string} table_name The name of the table
-     * @returns {Promise<boolean>} true or false
-     */
-    async exists(table_name) {
-        return await this.decorator(async (table_name, client) => {
-            const sql = `
-                SELECT EXISTS (
-                    SELECT FROM information_schema.tables 
-                    WHERE table_schema = $1
-                    AND table_name = $2
-                );
-            `;
-
-            const { rows } = await client.query(sql, [this.schema, table_name]);
-            return rows[0].exists;
-        })(table_name);
-    }
-
-    /**
-     * Inserts a new row into the specified table.
-     * @param {string} table_name The name of the table.
-     * @param {object} values An object where keys are column names and values are the values to insert.
-     * @throws {Error} If a mandatory column is missing a value.
-     * @throws {Error} If `values` contains keys that are not valid column names.
-     */
-    async add(table_name, values) {
-        await this.decorator(async (table_name, values, client) => {
-            const keysArray = Object.keys(values);
-            const valuesArray = Object.values(values);
-
-            validateSQLName(table_name, ...keysArray);
-
-            const schemaData = await this.getSchemaData(table_name);
-            const columnNames = schemaData.map((columnData) => columnData['column_name']);
+            const schemaData = await this.getSchemaData(this.tableName);
+            const columns = schemaData.map(col => col.column_name);
 
             const mandatoryColumns = schemaData
                 .filter(col => col.is_nullable === 'NO')
                 .map(col => col.column_name);
 
-            const columnsToInsertString = '(' + keysArray.join(', ') + ')';
+            const sortedValues = rows.map(values => {
+                const valueKeys = Object.keys(values);
 
-            for (const col of mandatoryColumns) {
-                if (!Object.hasOwn(values, col)) {
-                    throw new Error(`Missing mandatory column value: ${col}`);
-                }
-            }
+                if (!valueKeys.every((col) => columns.includes(col)))
+                    throw new Error(`Some of the provided columns don't exist in table "${tablePath}"`);
 
-            if (keysArray.length > columnNames.length) {
-                throw new Error(`Some of the values's keys aren't valid columns in ${table_name} table`);
-            }
+                if (!mandatoryColumns.every((col) => valueKeys.includes(col) && values[col]))
+                    throw new Error(`Missing mandatory columns: ${mandatoryColumns}`);
+            
+                return columns.map(col => values[col] || null);
+            });
 
-            const sql = format(`INSERT INTO %I %s VALUES (%L)`, table_name, columnsToInsertString, valuesArray)
+            const sqlValuesString = sortedValues.map((row) => format(`(%L)`, row))
 
-            await client.query(sql);
-        })(table_name, values);
+            const sql = format(`INSERT INTO %I VALUES %s %s;`, this.tableName, sqlValuesString, this.sql.returning);
+
+            return (await client.query(sql)).rows;
+        })(values);
+    }
+
+    /**
+     * Updates rows in the table.
+     * @param {object} values An object representing the columns to update and their new values.
+     * @returns {Promise<Array<object>>} A promise that resolves to an array of the updated rows.
+     */
+    async update(values) {
+        return await this.decorator(async (values, client) => {
+            await this.checkForTable();
+
+            const set = Object.entries(values)
+                .map(([key, value]) => format(`%I = %L`, key, value));
+
+            const { where, returning } = this.sql;
+            const sql = format(`UPDATE %I SET %s %s %s;`, this.tableName, set, where, returning);
+            
+            return (await client.query(sql)).rows;
+        })(values);
     }
 
     /**
      * Creates a new column in a specified table.
-     * @param {string} table_name - The name of the table to add the column to.
      * @param {object} columnData - An object containing the configuration for the new column.
      * @param {string} columnData.name - The name of the new column. Must be a valid SQL identifier.
      * @param {string} columnData.type - The data type of the column. Supported types: 'string', 'int', 'float', 'date', 'timestamp', 'time'.
@@ -366,21 +411,23 @@ class Model {
      * @throws {Error} If required parameters for a data type are missing (e.g., length for string).
      * @throws {Error} If an unsupported data type is specified.
      */
-    async createColumn(table_name, columnData) {
-        await this.decorator(async (table_name, columnData, client) => {
-            const schemaData = await this.getSchemaData(table_name);
-            const { name, type, length, precision, scale, defaultValue, nullable } = columnData;
-            const columnNames = schemaData.map((columnData) => columnData['column_name']);
+    async add(columnData) {
+        await this.decorator(async (client) => {
+            await this.checkForTable();
 
-            validateSQLName(table_name, name);
+            const schemaData = await this.getSchemaData(this.tableName);
+            let { name, type, length, precision, scale, defaultValue, nullable } = columnData;
+            const columnNames = schemaData.map((col) => col['column_name']);
 
-            let sqlType = ``;
+            type = type.toLowerCase();
+
+            validateSQLName(name);
 
             if (columnNames.includes(name)) {
                 throw new Error(`Duplicate column name: ${name}`);
             }
 
-            sqlType = (() => {
+            const sqlType = (() => {
                 if (type === 'string') {
                     if (!length) throw new Error('string type requires max length');
 
@@ -402,258 +449,98 @@ class Model {
             const nullClause = nullable === false ? "NOT NULL" : "";
 
             const sql = format(`ALTER TABLE %I ADD COLUMN %I %s %s %s;`, 
-                table_name, name, sqlType, nullClause, defaultClause);
+                this.tableName, name, sqlType, nullClause, defaultClause);
 
             await client.query(sql);
-        })(table_name, columnData);
+        })();
     }
 
     /**
-     * Creates a new table in the database.
-     * @param {string} table_name The name of the table to create.
-     * @throws {Error} If the table already exists.
-     * @throws {Error} If table name isn't valid.
+     * Deletes a column from a table.
+     * @param {string} column The name of the column to delete.
      */
-    async createTable(table_name) {
-        await this.decorator(async (table_name, client) => {
-            validateSQLName(table_name);
+    async del(column) {
+        await this.decorator(async (column, client) => {
+            await this.checkForTable();
 
-            const exists = await this.exists(table_name);
+            validateSQLName(column);
 
-            if (exists) 
-                throw new Error(`table "${table_name}" already exists`);
-            
-            const sql = format(`CREATE TABLE %I ();`, table_name);
+            const schemaData = await this.getSchemaData(this.tableName);
+            const columns = schemaData.map(col => col.column_name);
+
+            if (!columns.includes(column))
+                throw new Error(`There's no such column as "${column}" in the table "${this.tableName}"`);
+
+            const sql = format(`ALTER TABLE %I DROP COLUMN %I`, this.tableName, column);
 
             await client.query(sql);
-        })(table_name);
-    }
-
-    /**
-     * Retrieves records from a table.
-     * @param {string} table_name The name of the table.
-     * @param {function(object): boolean} [specification] A function to filter the results.
-     * It receives a row object and should return `true` to include the row in the result.
-     * @param {Array<string>} columns An array of columns to select from the table.
-     * @returns {Promise<Array<object>>} A promise that resolves to an array of row objects.
-     */
-    async get(table_name, specification, columns) {
-        return await this.decorator(async (table_name, specification, columns, client) => {
-            const expression = columns?.length ? columns.join(', ') : '*';
-            const sql = format(`SELECT %s FROM %I;`, expression, table_name);
-
-            const { rows } = await client.query(sql);
-
-            if (specification) {
-                return rows.filter(specification);
-            }
-            
-            return rows;
-        })(table_name, specification, columns);
+        })(column);
     }
 
     /**
      * Counts the number of rows in a given table
-     * @param {string} table_name the name of the table
      * @returns the number of rows in the table
      */
-    async countRows(table_name) {
-        return await this.decorator(async (table_name, client) => {
-            validateSQLName(table_name)
+    async count() {
+        return await this.decorator(async (client) => {
+            await this.checkForTable();
 
-            const sql = format(`SELECT COUNT(*) FROM %I`, table_name);
+            const sql = format(`SELECT COUNT(*) FROM %I`, this.tableName);
+
             const { rows } = await client.query(sql);
 
-            return parseInt(rows[0].count);
-        })(table_name);
+            return rows[0].count;
+        })();
     }
 
     /**
      * Returns the first item in the table
-     * @param {string} table_name the name of the table
      * @returns the very first row in the table
      */
-    async firstItem(table_name) {
-        return await this.decorator(async (table_name, client) => {
-            validateSQLName(table_name);
+    async first() {
+        return await this.decorator(async (client) => {
+            await this.checkForTable();
 
-            const sql = format(`SELECT * FROM %I LIMIT 1`, table_name);
+            const sql = format(`SELECT * FROM %I LIMIT 1`, this.tableName);
+
             const { rows } = await client.query(sql);
 
             return rows[0];
-        })(table_name);
+        })();
     }
 
     /**
      * Returns the last item in the table
-     * @param {string} table_name the name of the table
      * @returns the last row in a given table
      */
-    async lastItem(table_name) {
-        validateSQLName(table_name);
+    async lastItem() {
+        await this.checkForTable();
 
-        const hasPrimaryKeys = await this.getPrimaryKeys(table_name);
+        const hasPrimaryKeys = await this.getPrimaryKeys(this.tableName);
         let obj;
 
         if (hasPrimaryKeys.length) {
-            obj = await this.decorator(async (table_name, client) => {
+            obj = await this.decorator(async (client) => {
                 const sql = format(`SELECT * FROM %I ORDER BY (%s) DESC LIMIT 1`, 
-                    table_name, hasPrimaryKeys.map(col => col.column_name));
+                    this.tableName, hasPrimaryKeys.map(col => col.column_name));
 
                 return await client.query(sql);
-            })(table_name);
+            })();
 
             obj = obj.rows;
         } else {
             // If a tabel has no primary keys we can only get the last row 
             // by quering all the rows and then returning the last one from that.
-            obj = await this.get(table_name);
+            obj = await this.select().get();
         }
 
         return obj[obj.length - 1];
     }
-
-    /**
-     * Deletes rows from a table based on a condition.
-     * @param {string} table_name The name of the table.
-     * @param {Object<string, Array<string>>} mapping The mapping to decide which columns to use 
-     * in WHERE clause and operators with which to join the columns.
-     * @param {array} mapping.columns An array of columns.
-     * @param {array} mapping.ops An array of sql logical operators ('OR', 'AND').
-     * @param {function(object): boolean} condition A function that filters which rows to delete.
-     */
-    async delete(table_name, mapping, condition) {
-        await this.decorator(async (table_name, mapping, condition, client) => {
-            const { columns, ops } = mapping || {};
-            if (!columns?.length || !ops?.length) 
-                throw new Error(`Mapping is not provided. Instead got: ${columns} as columns and ${ops} as operators`);
-
-            validateSQLName(table_name, ...columns);
-
-            const selectedByCondition = await this.get(table_name, condition, columns);
-
-            const sqlStrings = columns.reduce((acc, col) => {
-                const valuesToDeleteSet = new Set(selectedByCondition.map((obj) => obj[col]));
-                const valuesToDelete = [...valuesToDeleteSet];
-
-                if (valuesToDelete.every((value) => value === null)) {
-                    acc.push(format(`%I IS NULL`, col));
-                } else if (valuesToDelete.some((value) => value === null)) {
-                    acc.push(format(`%1$I IS NULL OR %1$I IN (%L)`, col, 
-                        valuesToDelete.filter((value) => value !== null)));
-                } else {
-                    acc.push(format(`%I IN (%L)`, col, valuesToDelete));
-                } 
-                
-                return acc;
-            }, []);
-            
-            const operation = ops.reduce((acc, op, idx) => {
-                if (sqlStrings[idx] && sqlStrings[idx + 1]) {
-                    acc = sqlStrings[idx] + ` ${op} ` + sqlStrings[idx + 1];
-                    return acc;
-                }
-
-                return acc;
-            }, '') || sqlStrings[0];
-            
-            const sql = format(`DELETE FROM %I WHERE %s;`, table_name, operation);
-
-            client.query(sql);
-        })(table_name, mapping, condition);
-    }
-
-    /**
-     * Deletes a column from a table.
-     * @param {string} table_name The name of the table.
-     * @param {string} column The name of the column to delete.
-     */
-    async deleteColumn(table_name, column) {
-        await this.decorator(async (table_name, column, client) => {
-            validateSQLName(table_name, column);
-
-            const sql = format(`ALTER TABLE %I DROP COLUMN %I;`, table_name, column);
-
-            await client.query(sql);
-        })(table_name, column);
-    }
-
-    /**
-     * Deletes a table from the database.
-     * @param {string} table_name The name of the table to delete.
-     */
-    async deleteTable(table_name) {
-        await this.decorator(async (table_name, client) => {
-            validateSQLName(table_name);
-
-            const sql = format(`DROP TABLE %I`, table_name);
-
-            await client.query(sql);
-        })(table_name);
-    }
-
-    /**
-     * Updates records in a table based on a condition object.
-     * @param {string} table_name The name of the table.
-     * @param {Object.<string, string|number>} setter An object representing the columns to update. Each key is a column name and the corresponding value is the new value.
-     * @param {Object.<string, object|null>} condition An object that defines the WHERE clause. The properties are processed in order to build the clause. 
-     * @example
-     * To update rows where name is 'Gustavo' or 'Jack' OR job is 'janitor':
-     * const condition = {
-     *   name: { value: ['Gustavo', 'Jack'], op: '=' }, // -> name IN ('Gustavo', 'Jack')
-     *   OR: null,                                     // -> OR
-     *   job: { value: 'janitor', op: '=' }             // -> job = 'janitor'
-     * };
-     * await db.update('some_table', { status: 'inactive' }, condition);
-     * Resulting WHERE clause: WHERE name IN ('Gustavo', 'Jack') OR job = 'janitor'
-     */
-    async update(table_name, setter, condition) {
-        await this.decorator(async (table_name, setter, condition, client) => {
-            // No support for -, +, *, / and % operators
-            const operators = ['!=', '<>', '<=', '>=', '>', '<', '='];
-
-            const setClauses = Object.entries(setter)
-                .map(([key, value]) => format(`%I = %L`, key, value))
-                .join(', ');
-
-            const whereClauses = Object.entries(condition)
-                .map(([key, data]) => {
-                    const { value, op } = data || {};
-
-                    if (['OR', 'AND'].includes(key) && data === null) {
-                        return format(` %s `, key);
-                    } else if (
-                        (['string', 'number', 'object'].includes(typeof value) || Array.isArray(value)) && 
-                        typeof data === 'object' && typeof key === 'string' && typeof op === 'string' &&
-                        operators.includes(op)
-                    ) {
-                        if (Array.isArray(value)) {
-                            return format(`%I IN (%L)`, key, value);
-                        } else if (value === null) {
-                            return format(`%I IS NULL`, key);
-                        }
-    
-                        return format(`%I %s %L`, key, op, value);
-                    } else {
-                        throw new Error(`key: ${key} and value: ${value} are not valid condition items`)
-                    }
-                })
-                .join("");
-
-            const sql = format(`UPDATE %I SET %s WHERE %s;`, table_name, setClauses, whereClauses);
-
-            await client.query(sql);
-        })(table_name, setter, condition);
-    }
 }
 
 // Do not run npm test with this not commented out
-// const model = new Model(dbConfig);
+const md = new ModelQueryBuilder(dbConfig);
+const res = await md.deleteTable('tests');
+console.log(res);
 
-// examples:
-// await model.delete('some_table', {columns: ['salary', 'job'], ops: ['AND']}, (obj) => obj.salary > 5000 && obj.job !== 'seller');
-// await model.update('some_table', {name: 'new name'}, {job: {value: 'janitor'}, op: '='}, AND: null, salary: {value: 5000, op: '<'});
-// const res = await model.getSchemaData('some_table', null, ['age', 'salary'])
-// console.log(res);
-
-export {Model, dbConfig};
+export {ModelQueryBuilder, dbConfig};
