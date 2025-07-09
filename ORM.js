@@ -24,7 +24,7 @@ class ModelQueryBuilder extends QueryBuilder {
         this.pool = new Pool(config);
         this.schemaName = config._schemaName;
         this.tableName = ``;
-        this.sql = {select: '', order: '', limit: ''};       
+        this.sql = {delete: '', select: '', where: '', order: '', limit: ''};   
     }
 
     /** 
@@ -103,6 +103,48 @@ class ModelQueryBuilder extends QueryBuilder {
         return this;
     }
 
+    // Rewrites the where property. To add a where clause use "or" or "and" methods
+    where(...args) {
+        const operators = ['=', '!=', '<>', '>=', '<=', '<', '>'];
+        if (operators.includes(args[1]) && args.length === 3) {
+            this.sql.where = format(`WHERE %I %s %L`, args[0].trim(), args[1], args[2]);
+        } else if (Array.isArray(args[1]) && args.length === 2) {
+            this.sql.where = format(`WHERE %I IN (%L)`, args[0].trim(), args[1]);
+        } else if (
+            typeof args[0] === 'string' && 
+            ['string', 'number'].includes(typeof args[1]) 
+            && args.length === 2
+        ) {
+            this.sql.where = format(`WHERE %I = %L`, args[0].trim(), args[1]);
+        }
+
+        return this;
+    }
+
+    or(...args) {
+        if (!this.sql.where)
+            throw new Error(`You can't call "or" method without first calling where method`);
+
+        const whereToAdd = this.sql.where + ' OR ';
+        this.where(...args);
+
+        this.sql.where = whereToAdd + this.sql.where;
+
+        return this;
+    }
+
+    and(...args) {
+        if (!this.sql.where)
+            throw new Error(`You can't call "and" method without first calling where method`);
+
+        const whereToAdd = this.sql.where ? this.sql.where + ' AND ' : '';
+        this.where(...args);
+
+        this.sql.where = whereToAdd + this.sql.where;
+
+        return this;
+    }
+
     orderBy(...columns) {
         this._order = columns?.length ? columns.filter(col => col !== '*') : ['*'];
         this.sql.order = format(`ORDER BY %s`, this._order);
@@ -137,8 +179,7 @@ class ModelQueryBuilder extends QueryBuilder {
                 .join(' ')
                 .trim() + ';';
 
-            const condition = this._where.length ? (row) => this._where.every(cond => cond(row)) : () => true;
-            const res = (await client.query(sql)).rows.filter(condition);
+            const res = (await client.query(sql)).rows;
 
             if (this._desc)
                 res.reverse();
@@ -147,57 +188,36 @@ class ModelQueryBuilder extends QueryBuilder {
         })();
     }
 
+    // Deletes rows
     async delete() {
         return await this.decorator(async (client) => {
             await this.checkForTable();
-            if (!this._alter.length)
-                throw new Error(`User didn't provide columns to delete`);
 
-            const schemaData = await this.getSchemaData(this.tableName);
-            const columns = schemaData.map(row => row.column_name);
+            let rows;
+            const { where } = this.sql;
+            const sql = format(`DELETE FROM %I %s;`, this.tableName, where);
 
-            if (!this._alter.every((col) => columns.includes(col)) && this._alter[0] !== '*')
-                throw new Error(`Some of the chosen columns don't exist in the "${this.tableName}" table`);
+            if (this._returning.length && this._returning.includes('*')) {
+                const returning = format(`SELECT * FROM %I %s`, this.tableName, where);
 
-            const qb = new ModelQueryBuilder(dbConfig);
-            qb.table(this.tableName).select();
-            if (this._where) {
-                for (const cond of this._where) {
-                    qb.where(cond);
-                }
+                rows = (await client.query(returning)).rows;
+            } else if (this._returning.length && !this._returning.includes('*')) {
+                const returning = format(`SELECT %s FROM %I %s`, this._returning, this.tableName, where);
+
+                rows = (await client.query(returning)).rows;
             }
-            const selectedByCondition = await qb.get();
 
-            const sqlStrings = columns.reduce((acc, col) => {
-                const valuesToDeleteSet = new Set(selectedByCondition.map((obj) => obj[col]));
-                const valuesToDelete = [...valuesToDeleteSet];
+            await client.query(sql);
 
-                if (valuesToDelete.every((value) => value === null)) {
-                    acc.push(format(`%I IS NULL`, col));
-                } else if (valuesToDelete.some((value) => value === null)) {
-                    acc.push(format(`%1$I IS NULL OR %1$I IN (%L)`, col, 
-                        valuesToDelete.filter((value) => value !== null)));
-                } else {
-                    acc.push(format(`%I IN (%L)`, col, valuesToDelete));
-                } 
-                
-                return acc;
-            }, []);
-            
-            const operation = ops.reduce((acc, op, idx) => {
-                if (sqlStrings[idx] && sqlStrings[idx + 1]) {
-                    acc = sqlStrings[idx] + ` ${op} ` + sqlStrings[idx + 1];
-                    return acc;
-                }
-
-                return acc;
-            }, '') || sqlStrings[0];
+            if (this._returning.length) {
+                return rows;
+            }
         })();
     }
 }
 
 const md = new ModelQueryBuilder(dbConfig);
-const res = await md.table('some_table').alter().where(row => row.age < 40).delete();
+const res = await md.table('some_table').returning().where('name', 'David').delete();
 console.log(res);
 
 /**

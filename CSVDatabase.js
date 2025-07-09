@@ -10,6 +10,7 @@ class CSVQueryBuilder extends QueryBuilder {
      */
     constructor(tableName, database) {
         super();
+        this._where = [];
         this.tableName = tableName;
         this.database = database;
     }

@@ -1,7 +1,6 @@
 export class QueryBuilder {
     constructor() {
         this._select = [];
-        this._where = [];
         this._order = [];
         this._returning = [];
         this._desc = false;
