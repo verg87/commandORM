@@ -17,17 +17,13 @@ const validateSQLName = (...args) => {
         throw new Error(`Column/Table names can consist of only upper or lower cased letters, underscores and numbers`);
 }
 
-
-class ModelQueryBuilder extends QueryBuilder {
+class Model {
     /**
      * @param {object} config The database configuration object.
      */
     constructor(config) {
-        super();
         this.pool = new Pool(config);
         this.schemaName = config._schemaName;
-        this.tableName = ``;
-        this.sql = {delete: '', select: '', where: '', order: '', limit: '', returning: ''};   
     }
 
     /** 
@@ -114,19 +110,6 @@ class ModelQueryBuilder extends QueryBuilder {
     }
 
     /**
-     * Checks if a table has been selected and if it exists in the database.
-     * @throws {Error} If no table has been selected.
-     * @throws {Error} If the selected table does not exist.
-     */
-    // Istead check if table in the database list
-    async checkForTable() {
-        if (!this.tableName)
-            throw new Error(`Table haven't been chosen`);
-        else if (!(await this.exists(this.tableName)))
-            throw new Error(`The "${this.tableName}" table doesn't exist in the database`);
-    }
-
-    /**
      * Creates a new table in the database.
      * @param {string} tableName The name of the table to create.
      * @throws {Error} If the table already exists.
@@ -134,14 +117,11 @@ class ModelQueryBuilder extends QueryBuilder {
      */
     async createTable(tableName) {
         await this.decorator(async (tableName, client) => {
-            if (this.tableName)
-                throw new Error(`Can't create a table when you chose one with "table" method`);
-            else if ((await this.exists(tableName)))
+            if ((await this.exists(tableName)))
                 throw new Error(`The "${tableName}" table already exists`);
             
             validateSQLName(tableName);
 
-            // add creating tables with values
             const sql = format(`CREATE TABLE %I ()`, tableName);
 
             await client.query(sql);
@@ -154,9 +134,7 @@ class ModelQueryBuilder extends QueryBuilder {
      */
     async deleteTable(tableName) {
         await this.decorator(async (tableName, client) => {
-            if (this.tableName)
-                throw new Error(`Can't create a table when you chose one with "table" method`);
-            else if (!(await this.exists(tableName)))
+            if (!(await this.exists(tableName)))
                 throw new Error(`The "${tableName}" table doesn't exist`);
             
             validateSQLName(tableName);
@@ -170,19 +148,42 @@ class ModelQueryBuilder extends QueryBuilder {
     /**
      * Sets the table to be used for the query.
      * @param {string} tableName The name of the table.
-     * @returns {ModelQueryBuilder} The current instance of the ModelQueryBuilder.
+     * @returns {TableQueryBuilder} The current instance of the TableQueryBuilder.
      */
     table(tableName) {
         validateSQLName(tableName);
+        return new TableQueryBuilder(this, tableName);
+    }
+}
 
+class TableQueryBuilder extends QueryBuilder {
+    /**
+     * @param {Model} model The model instance.
+     * @param {string} tableName The name of the table.
+     */
+    constructor(model, tableName) {
+        super();
+        this.model = model;
         this.tableName = tableName;
-        return this;
+        this.sql = {delete: '', select: '', where: '', order: '', limit: '', returning: ''};   
+    }
+
+    /**
+     * Checks if a table has been selected and if it exists in the database.
+     * @throws {Error} If no table has been selected.
+     * @throws {Error} If the selected table does not exist.
+     */
+    async checkForTable() {
+        if (!this.tableName)
+            throw new Error(`Table haven't been chosen`);
+        else if (!(await this.model.exists(this.tableName)))
+            throw new Error(`The "${this.tableName}" table doesn't exist in the database`);
     }
 
     /**
      * Specifies the columns to be selected.
      * @param {...string} columns The columns to select. If no columns are provided, all columns are selected.
-     * @returns {ModelQueryBuilder} The current instance of the ModelQueryBuilder.
+     * @returns {TableQueryBuilder} The current instance of the TableQueryBuilder.
      */
     select(...columns) {
         this._select = columns?.length ? columns.filter(col => col !== '*') : ['*'];
@@ -193,9 +194,8 @@ class ModelQueryBuilder extends QueryBuilder {
     /**
      * Adds a WHERE clause to the query.
      * @param {...any} args The arguments for the WHERE clause.
-     * @returns {ModelQueryBuilder} The current instance of the ModelQueryBuilder.
+     * @returns {TableQueryBuilder} The current instance of the TableQueryBuilder.
      */
-    // Rewrites the where property. To add a where clause use "or" or "and" methods
     where(...args) {
         const operators = ['=', '!=', '<>', '>=', '<=', '<', '>'];
         if (operators.includes(args[1]) && args.length === 3) {
@@ -210,6 +210,8 @@ class ModelQueryBuilder extends QueryBuilder {
             this.sql.where = format(`WHERE %I = %L`, args[0].trim(), args[1]);
         } else if (typeof args[0] === 'string' && args[1] === null && args.length === 2) {
             this.sql.where = format(`WHERE %I IS NULL`, args[0]);
+        } else {
+            throw new Error('Invalid arguments for where method');
         }
 
         return this;
@@ -218,7 +220,7 @@ class ModelQueryBuilder extends QueryBuilder {
     /**
      * Adds an OR condition to the WHERE clause.
      * @param {...any} args The arguments for the OR condition.
-     * @returns {ModelQueryBuilder} The current instance of the ModelQueryBuilder.
+     * @returns {TableQueryBuilder} The current instance of the TableQueryBuilder.
      * @throws {Error} If the `where` method has not been called first.
      */
     or(...args) {
@@ -228,7 +230,7 @@ class ModelQueryBuilder extends QueryBuilder {
         const whereToAdd = this.sql.where + ' OR ';
         this.where(...args);
 
-        this.sql.where = whereToAdd + this.sql.where;
+        this.sql.where = whereToAdd + this.sql.where.slice(6);
 
         return this;
     }
@@ -236,17 +238,17 @@ class ModelQueryBuilder extends QueryBuilder {
     /**
      * Adds an AND condition to the WHERE clause.
      * @param {...any} args The arguments for the AND condition.
-     * @returns {ModelQueryBuilder} The current instance of the ModelQueryBuilder.
+     * @returns {TableQueryBuilder} The current instance of the TableQueryBuilder.
      * @throws {Error} If the `where` method has not been called first.
      */
     and(...args) {
         if (!this.sql.where)
             throw new Error(`You can't call "and" method without first calling where method`);
 
-        const whereToAdd = this.sql.where ? this.sql.where + ' AND ' : '';
+        const whereToAdd = this.sql.where + ' AND ';
         this.where(...args);
 
-        this.sql.where = whereToAdd + this.sql.where;
+        this.sql.where = whereToAdd + this.sql.where.slice(6);
 
         return this;
     }
@@ -254,7 +256,7 @@ class ModelQueryBuilder extends QueryBuilder {
     /**
      * Specifies the columns to be returned by the query.
      * @param {...string} columns The columns to return.
-     * @returns {ModelQueryBuilder} The current instance of the ModelQueryBuilder.
+     * @returns {TableQueryBuilder} The current instance of the TableQueryBuilder.
      */
     returning(...columns) {
         this.sql.returning = format(`RETURNING %s`, columns);
@@ -264,7 +266,7 @@ class ModelQueryBuilder extends QueryBuilder {
     /**
      * Specifies the columns to order the results by.
      * @param {...string} columns The columns to order by.
-     * @returns {ModelQueryBuilder} The current instance of the ModelQueryBuilder.
+     * @returns {TableQueryBuilder} The current instance of the TableQueryBuilder.
      */
     orderBy(...columns) {
         this._order = columns?.length ? columns.filter(col => col !== '*') : ['*'];
@@ -274,7 +276,7 @@ class ModelQueryBuilder extends QueryBuilder {
 
     /**
      * Sets the order to descending.
-     * @returns {ModelQueryBuilder} The current instance of the ModelQueryBuilder.
+     * @returns {TableQueryBuilder} The current instance of the TableQueryBuilder.
      */
     desc() {
         this._desc = true;
@@ -284,7 +286,7 @@ class ModelQueryBuilder extends QueryBuilder {
     /**
      * Limits the number of rows returned by the query.
      * @param {number} number The maximum number of rows to return.
-     * @returns {ModelQueryBuilder} The current instance of the ModelQueryBuilder.
+     * @returns {TableQueryBuilder} The current instance of the TableQueryBuilder.
      */
     limit(number) {
         this.sql.limit = format(`LIMIT %s`, number);
@@ -298,16 +300,19 @@ class ModelQueryBuilder extends QueryBuilder {
      * @throws {Error} If any of the selected columns do not exist in the table.
      */
     async get() {
-        return await this.decorator(async (client) => {
+        return await this.model.decorator(async (client) => {
             await this.checkForTable();
             if (!this.sql.select)
                 throw new Error(`Columns haven't been selected`);
 
-            const schemaData = await this.getSchemaData(this.tableName);
+            const schemaData = await this.model.getSchemaData(this.tableName);
             const columns = schemaData.map(row => row.column_name);
 
             if (!this._select.every((col) => columns.includes(col)) && this._select[0] !== '*')
                 throw new Error(`Some of the selected columns don't exist in the "${this.tableName}" table`);
+
+
+            
 
             const sql = Object.values(this.sql)
                 .filter((value) => value)
@@ -328,7 +333,7 @@ class ModelQueryBuilder extends QueryBuilder {
      * @returns {Promise<Array<object>>} A promise that resolves to an array of the deleted rows.
      */
     async delete() {
-        return await this.decorator(async (client) => {
+        return await this.model.decorator(async (client) => {
             await this.checkForTable();
 
             const { where, returning } = this.sql;
@@ -346,23 +351,24 @@ class ModelQueryBuilder extends QueryBuilder {
      * @throws {Error} If any of the mandatory columns are missing.
      */
     async insert(values) {
-        return await this.decorator(async (values, client) => {
+        return await this.model.decorator(async (values, client) => {
             await this.checkForTable();
 
             const rows = Array.isArray(values) ? values : [values];
 
-            const schemaData = await this.getSchemaData(this.tableName);
+            const schemaData = await this.model.getSchemaData(this.tableName);
             const columns = schemaData.map(col => col.column_name);
 
             const mandatoryColumns = schemaData
-                .filter(col => col.is_nullable === 'NO')
+                .filter(col => col.is_nullable === 'NO' && !col.column_default)
                 .map(col => col.column_name);
 
             const sortedValues = rows.map(values => {
                 const valueKeys = Object.keys(values);
+                validateSQLName(...valueKeys);
 
                 if (!valueKeys.every((col) => columns.includes(col)))
-                    throw new Error(`Some of the provided columns don't exist in table "${tablePath}"`);
+                    throw new Error(`Some of the provided columns don't exist in table "${this.tableName}"`);
 
                 if (!mandatoryColumns.every((col) => valueKeys.includes(col) && values[col]))
                     throw new Error(`Missing mandatory columns: ${mandatoryColumns}`);
@@ -384,7 +390,7 @@ class ModelQueryBuilder extends QueryBuilder {
      * @returns {Promise<Array<object>>} A promise that resolves to an array of the updated rows.
      */
     async update(values) {
-        return await this.decorator(async (values, client) => {
+        return await this.model.decorator(async (values, client) => {
             await this.checkForTable();
 
             const set = Object.entries(values)
@@ -412,10 +418,10 @@ class ModelQueryBuilder extends QueryBuilder {
      * @throws {Error} If an unsupported data type is specified.
      */
     async add(columnData) {
-        await this.decorator(async (client) => {
+        await this.model.decorator(async (client) => {
             await this.checkForTable();
 
-            const schemaData = await this.getSchemaData(this.tableName);
+            const schemaData = await this.model.getSchemaData(this.tableName);
             let { name, type, length, precision, scale, defaultValue, nullable } = columnData;
             const columnNames = schemaData.map((col) => col['column_name']);
 
@@ -460,12 +466,12 @@ class ModelQueryBuilder extends QueryBuilder {
      * @param {string} column The name of the column to delete.
      */
     async del(column) {
-        await this.decorator(async (column, client) => {
+        await this.model.decorator(async (column, client) => {
             await this.checkForTable();
 
             validateSQLName(column);
 
-            const schemaData = await this.getSchemaData(this.tableName);
+            const schemaData = await this.model.getSchemaData(this.tableName);
             const columns = schemaData.map(col => col.column_name);
 
             if (!columns.includes(column))
@@ -482,14 +488,14 @@ class ModelQueryBuilder extends QueryBuilder {
      * @returns the number of rows in the table
      */
     async count() {
-        return await this.decorator(async (client) => {
+        return await this.model.decorator(async (client) => {
             await this.checkForTable();
 
             const sql = format(`SELECT COUNT(*) FROM %I`, this.tableName);
 
             const { rows } = await client.query(sql);
 
-            return rows[0].count;
+            return parseInt(rows[0].count);
         })();
     }
 
@@ -498,7 +504,7 @@ class ModelQueryBuilder extends QueryBuilder {
      * @returns the very first row in the table
      */
     async first() {
-        return await this.decorator(async (client) => {
+        return await this.model.decorator(async (client) => {
             await this.checkForTable();
 
             const sql = format(`SELECT * FROM %I LIMIT 1`, this.tableName);
@@ -513,14 +519,14 @@ class ModelQueryBuilder extends QueryBuilder {
      * Returns the last item in the table
      * @returns the last row in a given table
      */
-    async lastItem() {
+    async last() {
         await this.checkForTable();
 
-        const hasPrimaryKeys = await this.getPrimaryKeys(this.tableName);
+        const hasPrimaryKeys = await this.model.getPrimaryKeys(this.tableName);
         let obj;
 
         if (hasPrimaryKeys.length) {
-            obj = await this.decorator(async (client) => {
+            obj = await this.model.decorator(async (client) => {
                 const sql = format(`SELECT * FROM %I ORDER BY (%s) DESC LIMIT 1`, 
                     this.tableName, hasPrimaryKeys.map(col => col.column_name));
 
@@ -529,8 +535,6 @@ class ModelQueryBuilder extends QueryBuilder {
 
             obj = obj.rows;
         } else {
-            // If a tabel has no primary keys we can only get the last row 
-            // by quering all the rows and then returning the last one from that.
             obj = await this.select().get();
         }
 
@@ -538,9 +542,4 @@ class ModelQueryBuilder extends QueryBuilder {
     }
 }
 
-// Do not run npm test with this not commented out
-const md = new ModelQueryBuilder(dbConfig);
-const res = await md.deleteTable('tests');
-console.log(res);
-
-export {ModelQueryBuilder, dbConfig};
+export { Model, dbConfig };
