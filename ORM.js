@@ -152,6 +152,7 @@ class Model {
      */
     table(tableName) {
         validateSQLName(tableName);
+
         return new TableQueryBuilder(this, tableName);
     }
 }
@@ -165,7 +166,7 @@ class TableQueryBuilder extends QueryBuilder {
         super();
         this.model = model;
         this.tableName = tableName;
-        this.sql = {delete: '', select: '', where: '', order: '', limit: '', returning: ''};   
+        this.sql = {delete: '', select: '', where: '', order: '', limit: '', returning: ''}; 
     }
 
     /**
@@ -174,9 +175,7 @@ class TableQueryBuilder extends QueryBuilder {
      * @throws {Error} If the selected table does not exist.
      */
     async checkForTable() {
-        if (!this.tableName)
-            throw new Error(`Table haven't been chosen`);
-        else if (!(await this.model.exists(this.tableName)))
+        if (!(await this.model.exists(this.tableName)))
             throw new Error(`The "${this.tableName}" table doesn't exist in the database`);
     }
 
@@ -259,7 +258,7 @@ class TableQueryBuilder extends QueryBuilder {
      * @returns {TableQueryBuilder} The current instance of the TableQueryBuilder.
      */
     returning(...columns) {
-        this.sql.returning = format(`RETURNING %s`, columns);
+        this.sql.returning = format(`RETURNING %s`, columns.length ? columns.filter(v => v !== '*') : '*');
         return this;
     }
 
@@ -269,8 +268,8 @@ class TableQueryBuilder extends QueryBuilder {
      * @returns {TableQueryBuilder} The current instance of the TableQueryBuilder.
      */
     orderBy(...columns) {
-        this._order = columns?.length ? columns.filter(col => col !== '*') : ['*'];
-        this.sql.order = format(`ORDER BY %s`, this._order);
+        this._order = columns?.length ? columns.filter(col => col !== '*') : [];
+        this.sql.order = this._order.length ? format(`ORDER BY %s`, this._order) : '';
         return this;
     }
 
@@ -302,6 +301,7 @@ class TableQueryBuilder extends QueryBuilder {
     async get() {
         return await this.model.decorator(async (client) => {
             await this.checkForTable();
+
             if (!this.sql.select)
                 throw new Error(`Columns haven't been selected`);
 
@@ -468,7 +468,6 @@ class TableQueryBuilder extends QueryBuilder {
     async del(column) {
         await this.model.decorator(async (column, client) => {
             await this.checkForTable();
-
             validateSQLName(column);
 
             const schemaData = await this.model.getSchemaData(this.tableName);

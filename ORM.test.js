@@ -19,6 +19,12 @@ describe('Create tests table', () => {
     });
 });
 
+describe(`TableQueryBuilder checkForTable method`, () => {
+    test(`Table doesn't exist`, () => {
+        return expect(model.table('tests_and_something').checkForTable()).rejects.toThrow();
+    });
+})
+
 describe('Module\'s add method tests', () => {  
     test('Create name and job columns', async () => {
         await model.table('tests').add({name: 'name', type: 'string', length: 64, nullable: false});
@@ -110,11 +116,12 @@ describe('Model\'s insert method tests', () => {
     test('Insert into tests table values', async () => {
         await model.table('tests').insert([{name: "Micah", age: 29, job: 'rat'}]);
         await model.table('tests').insert({name: "Gustavo", age: 32});
-        await model.table('tests').insert({name: "Gustavo"});
+        const insertWithReturning = await model.table('tests').returning('name').insert({name: "Gustavo"});
 
         const rows = await model.table('tests').select().get();
 
         expect(rows.length).toBeGreaterThan(0);
+        expect(insertWithReturning[0].name).toBe('Gustavo')
     });
 
     test(`Insert into invalid table name, column`, async () => {    
@@ -169,15 +176,25 @@ describe('Model\'s get tests', () => {
 
         expect(tableContents.slice(0, 2)).toStrictEqual(tableContentsWithLimit);
 
-        const orderedTableContents = await model.table('tests').select().orderBy('age').get();
+        const tableContentsOrderedByAge = await model.table('tests').select().orderBy('age').get();
+        const tableContentsOrderedBy = await model.table('tests').select().orderBy().get();
 
-        expect(orderedTableContents[0].age).toStrictEqual(29);
+        expect(tableContentsOrderedByAge[0].age).toStrictEqual(29);
+        expect(tableContents).toStrictEqual(tableContentsOrderedBy)
     })
 
-    // test('get specific rows from table', async () => {
-    //     const res = await model.table('tests').select().where('job', ['chemist', 'rat']).get();
-    //     expect(res.map((row) => row.name)).toStrictEqual(["Micah", "Gustavo", "Gustavo"]);
-    // });
+    test('get specific rows from table', async () => {
+        const query = await model.table('tests').select().where('job', ['chemist', 'rat']).get();
+        const queryWithIsNull = await model.table('tests').select().where('job', null).and('age', null).get();
+        
+        expect(query.map((row) => row.name)).toStrictEqual(["Micah"]);
+        expect(queryWithIsNull.map(row => [row.job, row.age])).toStrictEqual([[null, null]])
+    });
+
+    test(`Use 'and' and 'or' methods without calling where first`, () => {
+        expect(() => model.table('tests').select().and('job', null)).toThrow();
+        expect(() => model.table('tests').select().or('age', null)).toThrow();
+    })
 });
 
 describe(`Models countRows method tests`, () => {
@@ -221,17 +238,22 @@ describe(`Models update method tests`, () => {
     //     expect(chemistWithAgeNullAfter[0].name).toBe('Pedro');
     // });
 
+    // test(`Update with returning`, async () => {
+
+    // })
+
     test(`Update where age is 29`, async () => {
         const personBefore = await model.table('tests')
             .select().where('job', 'rat').get();
 
-        await model.table('tests').where('age', 29).update({age: 31});
+        const updateWithReturning = await model.table('tests').returning().where('age', 29).update({age: 31});
 
         const personAfter = await model.table('tests')
             .select().where('job', 'rat').get();
 
         expect(personBefore[0].age).toBe(29);
         expect(personAfter[0].age).toBe(31);
+        expect(updateWithReturning).toStrictEqual(personAfter);
     });
 
     test(`Invalid condition items`, async () => {
