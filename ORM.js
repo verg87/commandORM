@@ -1,12 +1,12 @@
-import { escapeLiteral, Pool } from 'pg';
+import { Pool } from 'pg';
 import format from 'pg-format';
 import { QueryBuilder } from './queryBuilder.js';
 
 const dbConfig = {
     user: 'postgres',
     host: process.env['HOST'], 
-    database: 'practiceSQL',
-    password: process.env['POSTGRES_PASSWORD'],
+    database: 'practiceSQL', // ! SET it to your own db name
+    password: process.env['POSTGRES_PASSWORD'], // Set to your own postgreSQL password
     port: process.env['PORT'], // Set it to your own port
     allowExitOnIdle: true, // Change it in the future
     _schemaName: 'public',

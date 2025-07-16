@@ -380,4 +380,4 @@ class CSVDatabase {
 // const res = await db.table('index.csv').desc().get();
 // console.log(res);
 
-export {CSVDatabase, CSVQueryBuilder};
+export { CSVDatabase };
