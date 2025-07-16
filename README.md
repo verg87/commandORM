@@ -24,6 +24,6 @@ const db = new CSVDatabase('./commandORM/DB') // csv orm comes with a csv
 const csvContents = await db.table('index.csv').select().get();
 ```
 ## Installation
-git clone https://github.com/verg87/commandORM.git
-npm install
+git clone https://github.com/verg87/commandORM.git\n
+npm install\n
 npm test
