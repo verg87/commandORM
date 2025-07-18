@@ -26,4 +26,5 @@ const csvContents = await db.table('index.csv').select().get();
 ## Installation
 git clone https://github.com/verg87/commandORM.git  
 npm install  
-npm test
+## Testing  
+Change the dbConfig variable in ORM.js to your own postgresSQL database credentials and then run npm test 
