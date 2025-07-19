@@ -5,10 +5,10 @@ import { QueryBuilder } from './queryBuilder.js';
 const dbConfig = {
     user: 'postgres',
     host: process.env['HOST'], 
-    database: 'practiceSQL', // ! SET it to your own db name
-    password: process.env['POSTGRES_PASSWORD'], // Set to your own postgreSQL password
-    port: process.env['PORT'], // Set it to your own port
-    allowExitOnIdle: true, // Change it in the future
+    database: 'practiceSQL', 
+    password: process.env['POSTGRES_PASSWORD'], 
+    port: process.env['PORT'], 
+    allowExitOnIdle: true, 
     _schemaName: 'public',
 };
 
