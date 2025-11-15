@@ -1,4 +1,5 @@
-import {Model, dbConfig} from './ORM.js';
+import { Model } from '../src/ORM.js';
+import { dbConfig } from '../dbConfig.js'
 
 const model = new Model(dbConfig);
 

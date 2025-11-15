@@ -2,16 +2,6 @@ import { Pool } from 'pg';
 import format from 'pg-format';
 import { QueryBuilder } from './queryBuilder.js';
 
-const dbConfig = {
-    user: 'postgres',
-    host: process.env['HOST'], 
-    database: 'practiceSQL', 
-    password: process.env['POSTGRES_PASSWORD'], 
-    port: process.env['PORT'], 
-    allowExitOnIdle: true, 
-    _schemaName: 'public',
-};
-
 const validateSQLName = (...args) => {
     if (!args.every((arg) => /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(arg))) 
         throw new Error(`Column/Table names can consist of only upper or lower cased letters, underscores and numbers`);
@@ -541,4 +531,4 @@ class TableQueryBuilder extends QueryBuilder {
     }
 }
 
-export { Model, dbConfig };
+export { Model };

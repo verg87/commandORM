@@ -1,4 +1,4 @@
-import { CSVDatabase } from "./CSVDatabase.js";
+import { CSVDatabase } from "../src/CSVDatabase.js";
 
 describe(`QueryBuilder tests`, () => {
     let db;
