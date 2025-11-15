@@ -1,11 +1,16 @@
-# The ORM built for postgreSQL, and ORM for csv files
-Both ORM's very lightweight, fast and easy to use
-## Usage
+# CommandORM: An ORM/QueryBuilder For PostgreSQL And CSV
+
+CommandORM is a lightweight module that allows you to execute direct PostgreSQL commands within a JavaScript environment. It also features a Query Builder for efficiently retrieving, writing, updating, and deleting data from CSV files.
+
+## Code Example
+
+Below is an exmple of how to use the CommandORM.
+
 ``` javascript
-// The postgresSQL ORM
-import { Model } from './commandORM/ORM.js';
-// The CSV ORM
-import { CSVDatabase } from './commandORM/CSVDatabase.js';
+// The postgresSQL ORM/QueryBuilder
+import { Model } from 'commandORM/ORM.js';
+// The CSV QueryBuilder
+import { CSVDatabase } from 'commandORM/CSVDatabase.js';
 
 const config = {
     user: 'user-name',
@@ -13,19 +18,33 @@ const config = {
     database: 'your-db-name',
     password: 'your-password',
     port: 'your-port',
-    allowExitOnIdle: true, // this way you don't have to wait for program to finish after the query
+    allowExitOnIdle: true, 
+    // this way you don't have to wait for program to finish after the query
     _schemaName: 'your-schema-name',
 };
 
 const model = new Model(config);
 const sqlTableContents = await model.table('your-table-name').select().get();
 
-const db = new CSVDatabase('./commandORM/DB') // csv orm comes with a csv
+// CommandORM already has a folder with a CSV file inside
+const db = new CSVDatabase('./commandORM/DB') 
 const csvContents = await db.table('index.csv').select().get();
 ```
+
 ## Installation
-git clone https://github.com/verg87/commandORM.git  
-npm install  
+
+Need to have [Node.js](https://nodejs.org/) installed.  
+
+1. Clone the repo
+    ```bash
+    git clone https://github.com/verg87/commandORM.git 
+    ```
+2. Install dependencies
+    ```bash
+    npm install  
+    ```
+
 ## Testing  
+
 Change the dbConfig variable in ORM.js to your own postgresSQL database credentials and make sure there's no "tests" table in that database.  
 Then run npm test 

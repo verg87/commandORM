@@ -1,15 +1,42 @@
 {
+  "name": "commandorm",
+  "version": "1.0.0",
+  "description": "ORM/QueryBuilder for PostgreSQL and CSV",
+  "homepage": "https://github.com/verg87/commandORM#readme",
+  "bugs": {
+    "url": "https://github.com/verg87/commandORM/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/verg87/commandORM.git"
+  },
+  "license": "MIT",
+  "author": "verg87",
   "type": "module",
+  "exports": {
+    "./ORM": {
+      "import": "./src/ORM.js",
+      "require": "./src/ORM.js"
+    },
+    "./CSVDatabase": {
+      "import": "./src/CSVDatabase.js",
+      "require": "./src/CSVDatabase.js"
+    }
+  },
+  "main": "src/ORM.js",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "test": "jest",
+    "test:watch": "jest --watch"
+  },
   "dependencies": {
     "commander": "^14.0.0",
     "csv": "^6.3.11",
     "jest": "^30.0.3",
     "pg": "^8.16.3",
     "pg-format": "^1.0.4"
-  },
-  "scripts": {
-    "test": "jest",
-    "test:watch": "jest --watch"
   },
   "devDependencies": {
     "@babel/core": "^7.28.0",

@@ -1,5 +1,9 @@
+// import { Pool } from "pg";
 import { Model } from '../src/ORM.js';
 import { dbConfig } from '../dbConfig.js'
+
+// jest.mock("Pool")
+// ...
 
 const model = new Model(dbConfig);
 

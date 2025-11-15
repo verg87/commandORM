@@ -212,6 +212,7 @@ class CSVDatabase {
      * @param {string} folderPath The path to the database folder.
      */
     constructor(folderPath) {
+        //! Need to check if the folderPath exists
         this.databasePath = /\/$/.test(folderPath) ? folderPath : folderPath + '/';
     }
 
