@@ -1,15 +1,24 @@
-// import { Pool } from "pg";
+import { Pool, Client } from "pg";
 import { Model } from '../src/ORM.js';
 import { dbConfig } from '../dbConfig.js'
 
-// jest.mock("Pool")
-// ...
+// jest.mock("pg");
 
 const model = new Model(dbConfig);
 
+// let mockClient = Pool.mock.results[0].value.connect;
+// const mockPool = Pool.mock.results[0]?.value; 
+// const mockClient = mockPool?.connect.mock.results[0]?.value;
+
 describe('Create tests table', () => {
+    beforeEach(() => {
+        jest.clearAllMocks();
+    });
+
     test('Create tests table test', async () => {
         await model.createTable('tests');
+        
+        // mockClient.query.mockResolvedValueOnce({ rows: [{ exists: true }] });
         const exists = await model.exists('tests');
 
         expect(exists).toBe(true);

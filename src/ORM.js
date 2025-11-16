@@ -94,6 +94,7 @@ class Model {
                 );
             `;
 
+            // console.log(client.query);
             const { rows } = await client.query(sql, [this.schemaName, tableName]);
             return rows[0].exists;
         })(tableName);
@@ -301,9 +302,6 @@ class TableQueryBuilder extends QueryBuilder {
             if (!this._select.every((col) => columns.includes(col)) && this._select[0] !== '*')
                 throw new Error(`Some of the selected columns don't exist in the "${this.tableName}" table`);
 
-
-            
-
             const sql = Object.values(this.sql)
                 .filter((value) => value)
                 .join(' ')
@@ -424,20 +422,24 @@ class TableQueryBuilder extends QueryBuilder {
             }
 
             const sqlType = (() => {
-                if (type === 'string') {
-                    if (!length) throw new Error('string type requires max length');
+                switch(type) {
+                    case "string": {
+                        if (!length) throw new Error('string type requires max length');
 
-                    return `VARCHAR(${length})`;
-                } else if (type === 'int') {
-                    return `INT`;
-                } else if (type === 'float') {
-                    if (!precision || !scale) throw new Error('float type requires max and min');
+                        return `VARCHAR(${length})`;
+                    }
+                    case "float": {
+                        if (!precision || !scale) throw new Error('float type requires max and min');
 
-                    return `DECIMAL(${precision}, ${scale})`;
-                } else if (['date', 'timestamp', 'time'].includes(type)) {
-                    return type.toUpperCase();
-                } else {
-                    throw new Error(`Unsupported data type: ${type['name']}`);
+                        return `DECIMAL(${precision}, ${scale})`;
+                    }
+                    case "int":;
+                    case "timestamp":;
+                    case "time":;
+                    case "date":
+                        return type.toUpperCase();
+                    default: 
+                        throw new Error(`Unsupported data type: ${type['name']}`);
                 }
             })();
             
