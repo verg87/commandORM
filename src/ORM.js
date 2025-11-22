@@ -93,8 +93,7 @@ class Model {
                     AND table_name = $2
                 );
             `;
-
-            // console.log(client.query);
+          
             const { rows } = await client.query(sql, [this.schemaName, tableName]);
             return rows[0].exists;
         })(tableName);

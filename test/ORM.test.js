@@ -1,217 +1,511 @@
 import { Pool, Client } from "pg";
-import { Model } from '../src/ORM.js';
-import { dbConfig } from '../dbConfig.js'
-
-// jest.mock("pg");
+import { Model } from "../src/ORM.js";
+import { dbConfig } from "../dbConfig.js";
 
 const model = new Model(dbConfig);
 
-// let mockClient = Pool.mock.results[0].value.connect;
-// const mockPool = Pool.mock.results[0]?.value; 
-// const mockClient = mockPool?.connect.mock.results[0]?.value;
+let mockClient = Pool().connect();
 
-describe('Create tests table', () => {
-    beforeEach(() => {
-        jest.clearAllMocks();
-    });
+const nameFieldMock = {
+    column_name: "name",
+    column_default: null,
+    is_nullable: "NO",
+    data_type: "character varying",
+};
 
-    test('Create tests table test', async () => {
-        await model.createTable('tests');
-        
-        // mockClient.query.mockResolvedValueOnce({ rows: [{ exists: true }] });
-        const exists = await model.exists('tests');
+const jobFieldMock = {
+    column_name: "job",
+    column_default: "chemist",
+    is_nullable: "YES",
+    data_type: "character varying",
+};
+
+const ageFieldMock = {
+    column_name: "age",
+    column_default: null,
+    is_nullable: "YES",
+    data_type: "integer",
+};
+
+const gpaFieldMock = {
+    column_name: "gpa",
+    column_default: null,
+    is_nullable: "YES",
+    data_type: "decimal",
+};
+
+const dateFieldMock = {
+    column_name: "date_of_birth",
+    column_default: null,
+    is_nullable: "NO",
+    data_type: "date",
+};
+
+beforeEach(() => {
+    jest.restoreAllMocks();
+});
+
+describe("Create tests table", () => {
+    test("Create tests table test", async () => {
+        // model.createTable('tests') fires client.query two times
+        // and the model.exists calls client.query one time.
+        // That's why I need to mock client.query three times
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: false }] })
+            .mockResolvedValueOnce({})
+            .mockResolvedValueOnce({ rows: [{ exists: true }] });
+
+        await model.createTable("tests");
+
+        const exists = await model.exists("tests");
 
         expect(exists).toBe(true);
     });
 
     test(`Create already existing table`, async () => {
-        await expect(
-            model.createTable('tests')
-        ).rejects.toThrow();
+        mockClient.query.mockResolvedValueOnce({ rows: [{ exists: true }] });
+
+        await expect(model.createTable("tests")).rejects.toThrow();
     });
 });
 
 describe(`TableQueryBuilder checkForTable method`, () => {
     test(`Table doesn't exist`, () => {
-        return expect(model.table('tests_and_something').checkForTable()).rejects.toThrow();
+        mockClient.query.mockResolvedValueOnce({ rows: [{ exists: false }] });
+
+        expect(
+            model.table("tests_and_something").checkForTable()
+        ).rejects.toThrow();
     });
-})
+});
 
-describe('Module\'s add method tests', () => {  
-    test('Create name and job columns', async () => {
-        await model.table('tests').add({name: 'name', type: 'string', length: 64, nullable: false});
-        await model.table('tests').add({name: 'job', type: 'string', length: 64, defaultValue: 'chemist'});
+describe("Module's add method tests", () => {
+    test("Create name and job columns", async () => {
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: true }] })
+            .mockResolvedValueOnce({ rows: [] })
+            .mockResolvedValueOnce({});
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: true }] })
+            .mockResolvedValueOnce({ rows: [nameFieldMock] })
+            .mockResolvedValueOnce({});
 
-        const schemaData = await model.getSchemaData('tests');
-        expect(schemaData.map((col) => col['column_name'])).toStrictEqual(['name', 'job']);
-    }); 
+        await model
+            .table("tests")
+            .add({ name: "name", type: "string", length: 64, nullable: false });
+        await model.table("tests").add({
+            name: "job",
+            type: "string",
+            length: 64,
+            defaultValue: "chemist",
+        });
+
+        mockClient.query.mockResolvedValueOnce({
+            rows: [nameFieldMock, jobFieldMock],
+        });
+
+        const schemaData = await model.getSchemaData("tests");
+        expect(schemaData.map((col) => col["column_name"])).toStrictEqual([
+            "name",
+            "job",
+        ]);
+    });
 
     test(`Test adding duplicate columns`, async () => {
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: true }] })
+            .mockResolvedValueOnce({ rows: [nameFieldMock, jobFieldMock] });
+
         await expect(
-            model.table('tests').add({name: 'job', type: 'string', length: 64})
+            model.table("tests").add({ name: "job", type: "string", length: 64 })
         ).rejects.toThrow();
     });
 
     test(`Test adding invalid column name`, async () => {
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: true }] })
+            .mockResolvedValueOnce({ rows: [nameFieldMock, jobFieldMock] });
+
         await expect(
-            model.table('tests').add({name: 'age and salary', type: 'int', defaultValue: 30})
+            model
+                .table("tests")
+                .add({ name: "age and salary", type: "int", defaultValue: 30 })
         ).rejects.toThrow();
     });
 
     test(`Column with type of string but no length`, async () => {
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: true }] })
+            .mockResolvedValueOnce({ rows: [nameFieldMock, jobFieldMock] });
+
         await expect(
-            model.table('tests').add({name: 'address', type: 'string'})
+            model.table("tests").add({ name: "address", type: "string" })
         ).rejects.toThrow();
     });
 
     test(`Create int type column`, async () => {
-        await model.table('tests').add({name: 'age', type: 'int', nullable: true});
-        const schemaData = await model.getSchemaData('tests');
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: true }] })
+            .mockResolvedValueOnce({ rows: [nameFieldMock, jobFieldMock] })
+            .mockResolvedValueOnce({});
 
-        expect(schemaData.some((obj) => obj['column_name'] === 'age')).toBe(true);
+        await model
+            .table("tests")
+            .add({ name: "age", type: "int", nullable: true });
+
+        mockClient.query.mockResolvedValueOnce({
+            rows: [nameFieldMock, jobFieldMock, ageFieldMock],
+        });
+
+        const schemaData = await model.getSchemaData("tests");
+
+        expect(schemaData.some((obj) => obj["column_name"] === "age")).toBe(true);
     });
 
     test(`Test for error when creating float type column and not providing 'scale' and 'precision'`, async () => {
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: true }] })
+            .mockResolvedValueOnce({
+                rows: [nameFieldMock, jobFieldMock, ageFieldMock],
+            });
+
         await expect(
-            model.table('tests').add({name: 'gpa', type: 'float', nullable: false})
+            model.table("tests").add({ name: "gpa", type: "float", nullable: false })
         ).rejects.toThrow();
     });
 
     test(`Create float type column`, async () => {
-        await model.table('tests').add({name: 'gpa', type: 'float', precision: 3, scale: 2});
-        const schemaData = await model.getSchemaData('tests');
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: true }] })
+            .mockResolvedValueOnce({
+                rows: [nameFieldMock, jobFieldMock, ageFieldMock],
+            })
+            .mockResolvedValueOnce({});
 
-        expect(schemaData.some((obj) => obj['column_name'] === 'gpa')).toBe(true);
+        await model
+            .table("tests")
+            .add({ name: "gpa", type: "float", precision: 3, scale: 2 });
+
+        mockClient.query.mockResolvedValueOnce({
+            rows: [nameFieldMock, jobFieldMock, ageFieldMock, gpaFieldMock],
+        });
+
+        const schemaData = await model.getSchemaData("tests");
+
+        expect(schemaData.some((obj) => obj["column_name"] === "gpa")).toBe(true);
     });
 
     test(`Create date type column`, async () => {
-        await model.table('tests').add({name: 'date_of_birth', type: 'date', nullable: false});
-        const schemaData = await model.getSchemaData('tests');
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: true }] })
+            .mockResolvedValueOnce({
+                rows: [nameFieldMock, jobFieldMock, ageFieldMock, gpaFieldMock],
+            })
+            .mockResolvedValueOnce({});
 
-        expect(schemaData.some((obj) => obj['column_name'] === 'date_of_birth')).toBe(true);
+        await model
+            .table("tests")
+            .add({ name: "date_of_birth", type: "date", nullable: false });
+
+        mockClient.query.mockResolvedValueOnce({
+            rows: [
+                nameFieldMock,
+                jobFieldMock,
+                ageFieldMock,
+                gpaFieldMock,
+                dateFieldMock,
+            ],
+        });
+
+        const schemaData = await model.getSchemaData("tests");
+
+        expect(
+            schemaData.some((obj) => obj["column_name"] === "date_of_birth")
+        ).toBe(true);
     });
 
     test(`Unsupported column type`, async () => {
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: true }] })
+            .mockResolvedValueOnce({
+                rows: [
+                    nameFieldMock,
+                    jobFieldMock,
+                    ageFieldMock,
+                    gpaFieldMock,
+                    dateFieldMock,
+                ],
+            });
+
         await expect(
-            model.table('tests').add({name: 'something', type: 'something'})
+            model.table("tests").add({ name: "something", type: "something" })
         ).rejects.toThrow();
     });
 });
 
 describe(`Model's del method tests`, () => {
     test(`Delete column`, async () => {
-        await model.table('tests').del('date_of_birth');
-        await model.table('tests').del('gpa')
-        const schemaData = await model.getSchemaData('tests');
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: true }] })
+            .mockResolvedValueOnce({
+                rows: [
+                    nameFieldMock,
+                    jobFieldMock,
+                    ageFieldMock,
+                    gpaFieldMock,
+                    dateFieldMock,
+                ],
+            })
+            .mockResolvedValueOnce({});
 
-        expect(schemaData.every((obj) => !['date_of_birth', 'gpa'].includes(obj['column_name']))).toBe(true);
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: true }] })
+            .mockResolvedValueOnce({
+                rows: [nameFieldMock, jobFieldMock, ageFieldMock, gpaFieldMock],
+            })
+            .mockResolvedValueOnce({});
+
+        await model.table("tests").del("date_of_birth");
+        await model.table("tests").del("gpa");
+
+        mockClient.query.mockResolvedValueOnce({
+            rows: [nameFieldMock, jobFieldMock, ageFieldMock],
+        });
+
+        const schemaData = await model.getSchemaData("tests");
+
+        expect(
+            schemaData.every(
+                (obj) => !["date_of_birth", "gpa"].includes(obj["column_name"])
+            )
+        ).toBe(true);
     });
 
     test(`Invalid column name`, async () => {
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: true }] })
+            .mockResolvedValueOnce({
+                rows: [nameFieldMock, jobFieldMock, ageFieldMock],
+            });
+
         await expect(() =>
-            model.table('tests').del('somethinga')
+            model.table("tests").del("somethinga")
         ).rejects.toThrow();
     });
-
-    // test(``)
 });
 
 describe(`Model's getPrimaryKeys methods tests`, () => {
-    test('has primary keys', async () => {
-        const primaryKeys = await model.getPrimaryKeys('tests');
+    test("has primary keys", async () => {
+        mockClient.query.mockResolvedValueOnce({ rows: [] });
+
+        const primaryKeys = await model.getPrimaryKeys("tests");
 
         expect(primaryKeys.length).toBe(0);
     });
 });
 
-describe('Model\'s insert method tests', () => {
-    test('Insert into tests table values', async () => {
-        await model.table('tests').insert([{name: "Micah", age: 29, job: 'rat'}]);
-        await model.table('tests').insert({name: "Gustavo", age: 32});
-        const insertWithReturning = await model.table('tests').returning('name').insert({name: "Gustavo"});
+describe("Model's insert method tests", () => {
+    test("Insert into tests table values", async () => {
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: true }] })
+            .mockResolvedValueOnce({
+                rows: [nameFieldMock, jobFieldMock, ageFieldMock],
+            })
+            .mockResolvedValueOnce({});
 
-        const rows = await model.table('tests').select().get();
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: true }] })
+            .mockResolvedValueOnce({
+                rows: [nameFieldMock, jobFieldMock, ageFieldMock],
+            })
+            .mockResolvedValueOnce({});
+
+        await model.table("tests").insert([{ name: "Micah", age: 29, job: "rat" }]);
+        await model.table("tests").insert({ name: "Gustavo", age: 32 });
+
+        // mocking queries for model.table("tests").returning("name").insert({ name: "Gustavo" }); call
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: true }] })
+            .mockResolvedValueOnce({
+                rows: [nameFieldMock, jobFieldMock, ageFieldMock],
+            })
+            .mockResolvedValueOnce({ rows: [{ name: "Gustavo" }] });
+
+        // mocking queries for model.table("tests").select().get() call
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: true }] })
+            .mockResolvedValueOnce({
+                rows: [nameFieldMock, jobFieldMock, ageFieldMock],
+            })
+            .mockResolvedValueOnce({
+                rows: [
+                    { name: "Micah", age: 29, job: "rat" },
+                    { name: "Gustavo", age: 32, job: null },
+                    { name: "Gustavo", age: null, job: null },
+                ],
+            });
+
+        const insertWithReturning = await model
+            .table("tests")
+            .returning("name")
+            .insert({ name: "Gustavo" });
+
+        const rows = await model.table("tests").select().get();
 
         expect(rows.length).toBeGreaterThan(0);
-        expect(insertWithReturning[0].name).toBe('Gustavo')
+        expect(insertWithReturning[0].name).toBe("Gustavo");
     });
 
-    test(`Insert into invalid table name, column`, async () => {    
-        await expect(async () => {
-            await model.table('tests and something else').insert({name: "Bob"})
-        }).rejects.toThrow();
+    test(`Insert into invalid table name, column`, async () => {
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: true }] })
+            .mockResolvedValueOnce({
+                rows: [nameFieldMock, jobFieldMock, ageFieldMock],
+            });
 
         await expect(async () => {
-            await model.table('tests').insert({'and': "John"})
+            await model.table("tests and something else").insert({ name: "Bob" });
+        }).rejects.toThrow();
+
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: true }] })
+            .mockResolvedValueOnce({
+                rows: [nameFieldMock, jobFieldMock, ageFieldMock],
+            });
+
+        await expect(async () => {
+            await model.table("tests").insert({ and: "John" });
         }).rejects.toThrow();
     });
 
     test(`Test for missing mandatory column in object argument`, async () => {
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: true }] })
+            .mockResolvedValueOnce({
+                rows: [nameFieldMock, jobFieldMock, ageFieldMock],
+            })
+
         // Since name column can't be nullable and doesn't have default value it's mandatory
         await expect(
-            model.table('tests').insert({job: 'janitor'})
+            model.table("tests").insert({ job: "janitor" })
         ).rejects.toThrow();
     });
 
     test(`Test for not existing columns provided by user`, async () => {
-        // Age column doesn't exist in the tests table 
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: true }] })
+            .mockResolvedValueOnce({
+                rows: [nameFieldMock, jobFieldMock, ageFieldMock],
+            })
+
+        // weather column doesn't exist in the tests table
         await expect(
-            model.table('tests').insert({name: 'Jack', job: 'Janitor', age: 33, weather: 'hot'})
+            model
+                .table("tests")
+                .insert({ name: "Jack", job: "Janitor", age: 33, weather: "hot" })
         ).rejects.toThrow();
     });
 });
 
-describe('Model\'s get tests', () => {
-    test('get all rows from table', async () => {
-        const res = await model.table('tests').select().get();
-        expect(res[0].name).toBe('Micah');
+
+
+describe("Model's get tests", () => {
+    test("get all rows from table", async () => {
+        mockClient.query
+            .mockResolvedValueOnce({
+                rows: [
+                    { name: "Micah", age: 29, job: "rat" },
+                    { name: "Gustavo", age: 32, job: null },
+                    { name: "Gustavo", age: null, job: null },
+                ],
+            });
+
+        const res = await model.table("tests").select().get();
+        expect(res[0].name).toBe("Micah");
     });
 
     test(`call get without select and with unknown columns`, async () => {
-        await expect(
-            model.table('tests').get()
-        ).rejects.toThrow();
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: true }] })
+            .mockResolvedValueOnce({
+                rows: [nameFieldMock, jobFieldMock, ageFieldMock],
+            });
+
+        await expect(model.table("tests").get()).rejects.toThrow();
+
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: true }] })
+            .mockResolvedValueOnce({
+                rows: [nameFieldMock, jobFieldMock, ageFieldMock],
+            });
 
         await expect(
-            model.table('tests').select('*', 'something').get()
+            model.table("tests").select("*", "something").get()
         ).rejects.toThrow();
     });
 
     test(`use desc, limit, orderBy with get`, async () => {
-        const descTableContents = await model.table('tests').select().get();
-        const reversedTableContents = await model.table('tests').select().desc().get();
+        const descTableContents = await model.table("tests").select().get();
+        const reversedTableContents = await model
+            .table("tests")
+            .select()
+            .desc()
+            .get();
 
         expect(descTableContents.reverse()).toStrictEqual(reversedTableContents);
 
-        const tableContents = await model.table('tests').select().get();
-        const tableContentsWithLimit = await model.table('tests').select().limit(2).get();
+        const tableContents = await model.table("tests").select().get();
+        const tableContentsWithLimit = await model
+            .table("tests")
+            .select()
+            .limit(2)
+            .get();
 
         expect(tableContents.slice(0, 2)).toStrictEqual(tableContentsWithLimit);
 
-        const tableContentsOrderedByAge = await model.table('tests').select().orderBy('age').get();
-        const tableContentsOrderedBy = await model.table('tests').select().orderBy().get();
+        const tableContentsOrderedByAge = await model
+            .table("tests")
+            .select()
+            .orderBy("age")
+            .get();
+        const tableContentsOrderedBy = await model
+            .table("tests")
+            .select()
+            .orderBy()
+            .get();
 
         expect(tableContentsOrderedByAge[0].age).toStrictEqual(29);
-        expect(tableContents).toStrictEqual(tableContentsOrderedBy)
-    })
+        expect(tableContents).toStrictEqual(tableContentsOrderedBy);
+    });
 
-    test('get specific rows from table', async () => {
-        const query = await model.table('tests').select().where('job', ['chemist', 'rat']).get();
-        const queryWithIsNull = await model.table('tests').select().where('job', null).and('age', null).get();
-        
+    test("get specific rows from table", async () => {
+        const query = await model
+            .table("tests")
+            .select()
+            .where("job", ["chemist", "rat"])
+            .get();
+        const queryWithIsNull = await model
+            .table("tests")
+            .select()
+            .where("job", null)
+            .and("age", null)
+            .get();
+
         expect(query.map((row) => row.name)).toStrictEqual(["Micah"]);
-        expect(queryWithIsNull.map(row => [row.job, row.age])).toStrictEqual([[null, null]])
+        expect(queryWithIsNull.map((row) => [row.job, row.age])).toStrictEqual([
+            [null, null],
+        ]);
     });
 
     test(`Use 'and' and 'or' methods without calling where first`, () => {
-        expect(() => model.table('tests').select().and('job', null)).toThrow();
-        expect(() => model.table('tests').select().or('age', null)).toThrow();
-    })
+        expect(() => model.table("tests").select().and("job", null)).toThrow();
+        expect(() => model.table("tests").select().or("age", null)).toThrow();
+    });
 });
 
 describe(`Models countRows method tests`, () => {
     test(`Count rows`, async () => {
-        const rows = await model.table('tests').count();
+        const rows = await model.table("tests").count();
 
         expect(rows).toBe(3);
     });
@@ -219,17 +513,17 @@ describe(`Models countRows method tests`, () => {
 
 describe(`Models first method tests`, () => {
     test(`Get the first item`, async () => {
-        const allItems = await model.table('tests').select().get();
-        const firstItem = await model.table('tests').first();
+        const allItems = await model.table("tests").select().get();
+        const firstItem = await model.table("tests").first();
 
         expect(firstItem).toStrictEqual(allItems[0]);
     });
-})
+});
 
 describe(`Models last method tests`, () => {
     test(`Get the last item`, async () => {
-        const allItems = await model.table('tests').select().get();
-        const lastItem = await model.table('tests').last();
+        const allItems = await model.table("tests").select().get();
+        const lastItem = await model.table("tests").last();
 
         expect(lastItem).toStrictEqual(allItems[allItems.length - 1]);
     });
@@ -255,13 +549,23 @@ describe(`Models update method tests`, () => {
     // })
 
     test(`Update where age is 29`, async () => {
-        const personBefore = await model.table('tests')
-            .select().where('job', 'rat').get();
+        const personBefore = await model
+            .table("tests")
+            .select()
+            .where("job", "rat")
+            .get();
 
-        const updateWithReturning = await model.table('tests').returning().where('age', 29).update({age: 31});
+        const updateWithReturning = await model
+            .table("tests")
+            .returning()
+            .where("age", 29)
+            .update({ age: 31 });
 
-        const personAfter = await model.table('tests')
-            .select().where('job', 'rat').get();
+        const personAfter = await model
+            .table("tests")
+            .select()
+            .where("job", "rat")
+            .get();
 
         expect(personBefore[0].age).toBe(29);
         expect(personAfter[0].age).toBe(31);
@@ -270,32 +574,37 @@ describe(`Models update method tests`, () => {
 
     test(`Invalid condition items`, async () => {
         expect(() => {
-            model.table('tests').where('job', 'wrong', 'condition')
-                .and('age', 'correct stru').update({name: 'less'})
+            model
+                .table("tests")
+                .where("job", "wrong", "condition")
+                .and("age", "correct stru")
+                .update({ name: "less" });
         }).toThrow();
     });
 });
 
 describe(`Model's delete method tests`, () => {
     test(`Delete rows`, async () => {
-        await model.table('tests').where('age', '<', 30).or('name', ['Micah', 'Pedro', 'Gustavo']).delete();
-        const rows = await model.table('tests').select().get();
+        await model
+            .table("tests")
+            .where("age", "<", 30)
+            .or("name", ["Micah", "Pedro", "Gustavo"])
+            .delete();
+        const rows = await model.table("tests").select().get();
 
         expect(rows).toStrictEqual([]);
     });
-})
+});
 
-describe('Delete tests table', () => {
-    test('Delete tests table test', async () => {
-        await model.deleteTable('tests');
-        const exists = await model.exists('tests');
+describe("Delete tests table", () => {
+    test("Delete tests table test", async () => {
+        await model.deleteTable("tests");
+        const exists = await model.exists("tests");
 
         expect(exists).toBe(false);
     });
 
     test(`Delete table that doesn't exist`, async () => {
-        await expect(
-            model.deleteTable('tests')
-        ).rejects.toThrow();
+        await expect(model.deleteTable("tests")).rejects.toThrow();
     });
 });
