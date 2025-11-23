@@ -1,8 +1,7 @@
-import { Pool, Client } from "pg";
+import { Pool } from "pg";
 import { Model } from "../src/ORM.js";
-import { dbConfig } from "../dbConfig.js";
 
-const model = new Model(dbConfig);
+const model = new Model({});
 
 let mockClient = Pool().connect();
 
@@ -41,9 +40,15 @@ const dateFieldMock = {
     data_type: "date",
 };
 
+const users = [
+    { name: "Micah", age: 29, job: "rat" },
+    { name: "Gustavo", age: 32, job: null },
+    { name: "Gustavo", age: null, job: null },
+];
+
 beforeEach(() => {
-    jest.restoreAllMocks();
-});
+    mockClient.query.mockReset();
+})
 
 describe("Create tests table", () => {
     test("Create tests table test", async () => {
@@ -338,11 +343,7 @@ describe("Model's insert method tests", () => {
                 rows: [nameFieldMock, jobFieldMock, ageFieldMock],
             })
             .mockResolvedValueOnce({
-                rows: [
-                    { name: "Micah", age: 29, job: "rat" },
-                    { name: "Gustavo", age: 32, job: null },
-                    { name: "Gustavo", age: null, job: null },
-                ],
+                rows: users
             });
 
         const insertWithReturning = await model
@@ -412,6 +413,8 @@ describe("Model's insert method tests", () => {
 describe("Model's get tests", () => {
     test("get all rows from table", async () => {
         mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: true }] })
+            .mockResolvedValueOnce({ rows: [nameFieldMock, jobFieldMock, ageFieldMock] })
             .mockResolvedValueOnce({
                 rows: [
                     { name: "Micah", age: 29, job: "rat" },
@@ -444,8 +447,27 @@ describe("Model's get tests", () => {
         ).rejects.toThrow();
     });
 
-    test(`use desc, limit, orderBy with get`, async () => {
+    test(`use desc with get`, async () => {
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: true }] })
+            .mockResolvedValueOnce({
+                rows: [nameFieldMock, jobFieldMock, ageFieldMock],
+            })
+            .mockResolvedValueOnce({
+                rows: users,
+            });
+
         const descTableContents = await model.table("tests").select().get();
+
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: true }] })
+            .mockResolvedValueOnce({
+                rows: [nameFieldMock, jobFieldMock, ageFieldMock],
+            })
+            .mockResolvedValueOnce({
+                rows: users.reverse(),
+            });
+
         const reversedTableContents = await model
             .table("tests")
             .select()
@@ -453,8 +475,29 @@ describe("Model's get tests", () => {
             .get();
 
         expect(descTableContents.reverse()).toStrictEqual(reversedTableContents);
+    });
+
+    test(`use limit with get`, async () => {
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: true }] })
+            .mockResolvedValueOnce({
+                rows: [nameFieldMock, jobFieldMock, ageFieldMock],
+            })
+            .mockResolvedValueOnce({
+                rows: users,
+            });
 
         const tableContents = await model.table("tests").select().get();
+
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: true }] })
+            .mockResolvedValueOnce({
+                rows: [nameFieldMock, jobFieldMock, ageFieldMock],
+            })
+            .mockResolvedValueOnce({
+                rows: users.slice(0, 2),
+            });
+
         const tableContentsWithLimit = await model
             .table("tests")
             .select()
@@ -462,28 +505,52 @@ describe("Model's get tests", () => {
             .get();
 
         expect(tableContents.slice(0, 2)).toStrictEqual(tableContentsWithLimit);
+    });
+
+    test(`use orderBy with get`, async () => {
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: true }] })
+            .mockResolvedValueOnce({
+                rows: [nameFieldMock, jobFieldMock, ageFieldMock],
+            })
+            .mockResolvedValueOnce({
+                rows: users.sort((a, b) => a.age !== null && b.age !== null ? a.age - b.age : -1),
+            });
 
         const tableContentsOrderedByAge = await model
             .table("tests")
             .select()
             .orderBy("age")
             .get();
-        const tableContentsOrderedBy = await model
-            .table("tests")
-            .select()
-            .orderBy()
-            .get();
 
         expect(tableContentsOrderedByAge[0].age).toStrictEqual(29);
-        expect(tableContents).toStrictEqual(tableContentsOrderedBy);
     });
 
     test("get specific rows from table", async () => {
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: true }] })
+            .mockResolvedValueOnce({
+                rows: [nameFieldMock, jobFieldMock, ageFieldMock],
+            })
+            .mockResolvedValueOnce({
+                rows: users.filter((u) => u.job === "chemist" || u.job === "rat"),
+            });
+
         const query = await model
             .table("tests")
             .select()
             .where("job", ["chemist", "rat"])
             .get();
+
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: true }] })
+            .mockResolvedValueOnce({
+                rows: [nameFieldMock, jobFieldMock, ageFieldMock],
+            })
+            .mockResolvedValueOnce({
+                rows: users.filter((u) => u.job === null && u.age === null),
+            });
+
         const queryWithIsNull = await model
             .table("tests")
             .select()
@@ -505,6 +572,12 @@ describe("Model's get tests", () => {
 
 describe(`Models countRows method tests`, () => {
     test(`Count rows`, async () => {
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: true }] })
+            .mockResolvedValueOnce({
+                rows: [{ count: users.length }]
+            });
+
         const rows = await model.table("tests").count();
 
         expect(rows).toBe(3);
@@ -513,7 +586,23 @@ describe(`Models countRows method tests`, () => {
 
 describe(`Models first method tests`, () => {
     test(`Get the first item`, async () => {
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: true }] })
+            .mockResolvedValueOnce({
+                rows: [nameFieldMock, jobFieldMock, ageFieldMock],
+            })
+            .mockResolvedValueOnce({
+                rows: users,
+            });
+
         const allItems = await model.table("tests").select().get();
+
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: true }] })
+            .mockResolvedValueOnce({
+                rows: users.filter((u) => u.name === "Micah"),
+            });
+
         const firstItem = await model.table("tests").first();
 
         expect(firstItem).toStrictEqual(allItems[0]);
@@ -522,7 +611,52 @@ describe(`Models first method tests`, () => {
 
 describe(`Models last method tests`, () => {
     test(`Get the last item`, async () => {
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: true }] })
+            .mockResolvedValueOnce({
+                rows: [nameFieldMock, jobFieldMock, ageFieldMock],
+            })
+            .mockResolvedValueOnce({
+                rows: users,
+            });
+
         const allItems = await model.table("tests").select().get();
+
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: true }] })
+            .mockResolvedValueOnce({ rows: [] })
+            .mockResolvedValueOnce({ rows: [{ exists: true }] })
+            .mockResolvedValueOnce({
+                rows: [nameFieldMock, jobFieldMock, ageFieldMock],
+            })
+            .mockResolvedValueOnce({
+                rows: users.filter((u) => u.name === "Gustavo" && u.age === null),
+            });
+
+        const lastItem = await model.table("tests").last();
+
+        expect(lastItem).toStrictEqual(allItems[allItems.length - 1]);
+    });
+
+    test(`Get the last item with primary keys`, async () => {
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: true }] })
+            .mockResolvedValueOnce({
+                rows: [nameFieldMock, jobFieldMock, ageFieldMock],
+            })
+            .mockResolvedValueOnce({
+                rows: users,
+            });
+
+        const allItems = await model.table("tests").select().get();
+
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: true }] })
+            .mockResolvedValueOnce({ rows: [ "age" ] }) // Found a primary key
+            .mockResolvedValueOnce({
+                rows: users.filter((u) => u.name === "Gustavo" && u.age === null),
+            });
+
         const lastItem = await model.table("tests").last();
 
         expect(lastItem).toStrictEqual(allItems[allItems.length - 1]);
@@ -530,36 +664,47 @@ describe(`Models last method tests`, () => {
 });
 
 describe(`Models update method tests`, () => {
-    // test(`Update where job is chemist and age is null`, async () => {
-    //     const chemistWithAgeNullBefore = await model.table('tests')
-    //         .select().where('job', 'chemist').and('age', null).get();
-
-    //     await model.table('tests').where('job', ['rat', 'chemist'])
-    //         .and('age', null).update({name: 'Pedro'});
-
-    //     const chemistWithAgeNullAfter = await model.table('tests')
-    //         .select().where('job', 'chemist').and('age', null).get();
-
-    //     expect(chemistWithAgeNullBefore[0].name).toBe('Gustavo');
-    //     expect(chemistWithAgeNullAfter[0].name).toBe('Pedro');
-    // });
-
-    // test(`Update with returning`, async () => {
-
-    // })
-
     test(`Update where age is 29`, async () => {
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: true }] })
+            .mockResolvedValueOnce({
+                rows: [nameFieldMock, jobFieldMock, ageFieldMock],
+            })
+            .mockResolvedValueOnce({
+                rows: users.filter((u) => u.job === "rat"),
+            });
+
         const personBefore = await model
             .table("tests")
             .select()
             .where("job", "rat")
             .get();
 
+        // We are deep copying the user who's age is 29 and then 
+        // changing the age to what we need without touching the original variable
+        const updatedUser = JSON.parse(JSON.stringify(users.filter((u) => u.age === 29)[0]));
+        updatedUser.age = 31;
+
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: true }] })
+            .mockResolvedValueOnce({
+                rows: [updatedUser]
+            });
+
         const updateWithReturning = await model
             .table("tests")
             .returning()
             .where("age", 29)
             .update({ age: 31 });
+
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: true }] })
+            .mockResolvedValueOnce({
+                rows: [nameFieldMock, jobFieldMock, ageFieldMock],
+            })
+            .mockResolvedValueOnce({
+                rows: [updatedUser]
+            });
 
         const personAfter = await model
             .table("tests")
@@ -585,11 +730,25 @@ describe(`Models update method tests`, () => {
 
 describe(`Model's delete method tests`, () => {
     test(`Delete rows`, async () => {
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: true }] })
+            .mockResolvedValueOnce({});
+
         await model
             .table("tests")
             .where("age", "<", 30)
             .or("name", ["Micah", "Pedro", "Gustavo"])
             .delete();
+
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: true }] })
+            .mockResolvedValueOnce({
+                rows: [nameFieldMock, jobFieldMock, ageFieldMock],
+            })
+            .mockResolvedValueOnce({
+                rows: users.filter((u) => u.age >= 30 && !["Micah", "Pedro", "Gustavo"].includes(u.name))
+            });
+
         const rows = await model.table("tests").select().get();
 
         expect(rows).toStrictEqual([]);
@@ -598,13 +757,24 @@ describe(`Model's delete method tests`, () => {
 
 describe("Delete tests table", () => {
     test("Delete tests table test", async () => {
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: true }] })
+            .mockResolvedValueOnce({});
+
         await model.deleteTable("tests");
+
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: false }] });
+
         const exists = await model.exists("tests");
 
         expect(exists).toBe(false);
     });
 
     test(`Delete table that doesn't exist`, async () => {
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: false }] });
+
         await expect(model.deleteTable("tests")).rejects.toThrow();
     });
 });

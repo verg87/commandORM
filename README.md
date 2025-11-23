@@ -46,5 +46,18 @@ Need to have [Node.js](https://nodejs.org/) installed.
 
 ## Testing  
 
-Change the dbConfig variable in ORM.js to your own postgresSQL database credentials and make sure there's no "tests" table in that database.  
-Then run npm test 
+This project uses jest for testing. To run tests use:
+```bash
+npm test
+```
+
+### Coverage
+
+CommandORM has almost 100% test coverage  
+
+![Coverage report](docs/img/coverage.png) 
+
+To create a coverage report, use this command:
+```bash
+npm test --coverage
+```
