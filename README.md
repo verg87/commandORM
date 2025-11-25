@@ -42,6 +42,12 @@ Need to have [Node.js](https://nodejs.org/) installed.
     npm install  
     ```
 
+Or you can just install it with npm.
+
+```bash
+npm i commandorm
+```
+
 ## Testing  
 
 This project uses jest for testing. To run tests use:
