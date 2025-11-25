@@ -14,16 +14,16 @@
   "author": "verg87",
   "type": "module",
   "exports": {
-    "./ORM": {
-      "import": "./src/ORM.js",
-      "require": "./src/ORM.js"
+    ".": {
+      "import": "./src/index.js",
+      "require": "./src/index.js"
     },
-    "./CSVDatabase": {
-      "import": "./src/CSVDatabase.js",
-      "require": "./src/CSVDatabase.js"
+    "./queryBuilder": {
+      "import": "./src/queryBuilder.js",
+      "require": "./src/queryBuilder.js"
     }
   },
-  "main": "src/ORM.js",
+  "main": "src/index.js",
   "directories": {
     "test": "test"
   },

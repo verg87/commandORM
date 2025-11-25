@@ -1,0 +1,8 @@
+node_modules
+coverage
+dbConfig.js
+dev-notes.txt
+test
+__mocks__
+docs
+.gitignore

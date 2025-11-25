@@ -7,10 +7,8 @@ CommandORM is a lightweight module that allows you to execute direct PostgreSQL 
 Below is an exmple of how to use the CommandORM.
 
 ``` javascript
-// The postgresSQL ORM/QueryBuilder
-import { Model } from 'commandORM/ORM.js';
-// The CSV QueryBuilder
-import { CSVDatabase } from 'commandORM/CSVDatabase.js';
+// The postgresSQL ORM/QueryBuilder and CSV QueryBuilder
+import { Model, CSVDatabase } from 'commandORM';
 
 const config = {
     user: 'user-name',
