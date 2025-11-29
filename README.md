@@ -23,6 +23,8 @@ const config = {
 
 const model = new Model(config);
 const sqlTableContents = await model.table('your-table-name').select().get();
+// Closes all connections to postgreSQL
+await model.close();
 
 // CommandORM already has a folder with a CSV file inside
 const db = new CSVDatabase('./commandORM/DB') 

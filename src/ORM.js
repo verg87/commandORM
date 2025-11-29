@@ -29,10 +29,20 @@ class Model {
 
             try {
                 return await fn(...args, client);
+            } catch (error) {
+                throw new Error(error.message ?? "Oops something went wrong");
             } finally {
                 client.release();
             }
         }
+    }
+
+    /**
+     * Closes all connections to the PostgreSQL server.
+     * Should be run at the end of the programm.
+     */
+    async close() {
+        await this.pool.end();
     }
 
     /**
@@ -160,16 +170,6 @@ class TableQueryBuilder extends QueryBuilder {
     }
 
     /**
-     * Checks if a table has been selected and if it exists in the database.
-     * @throws {Error} If no table has been selected.
-     * @throws {Error} If the selected table does not exist.
-     */
-    async checkForTable() {
-        if (!(await this.model.exists(this.tableName)))
-            throw new Error(`The "${this.tableName}" table doesn't exist in the database`);
-    }
-
-    /**
      * Specifies the columns to be selected.
      * @param {...string} columns The columns to select. If no columns are provided, all columns are selected.
      * @returns {TableQueryBuilder} The current instance of the TableQueryBuilder.
@@ -290,7 +290,7 @@ class TableQueryBuilder extends QueryBuilder {
      */
     async get() {
         return await this.model.decorator(async (client) => {
-            await this.checkForTable();
+            // await this.checkForTable();
 
             if (!this.sql.select)
                 throw new Error(`Columns haven't been selected`);
@@ -321,7 +321,7 @@ class TableQueryBuilder extends QueryBuilder {
      */
     async delete() {
         return await this.model.decorator(async (client) => {
-            await this.checkForTable();
+            // await this.checkForTable();
 
             const { where, returning } = this.sql;
             const sql = format(`DELETE FROM %I %s %s;`, this.tableName, where, returning);
@@ -339,7 +339,7 @@ class TableQueryBuilder extends QueryBuilder {
      */
     async insert(values) {
         return await this.model.decorator(async (values, client) => {
-            await this.checkForTable();
+            // await this.checkForTable();
 
             const rows = Array.isArray(values) ? values : [values];
 
@@ -378,7 +378,7 @@ class TableQueryBuilder extends QueryBuilder {
      */
     async update(values) {
         return await this.model.decorator(async (values, client) => {
-            await this.checkForTable();
+            // await this.checkForTable();
 
             const set = Object.entries(values)
                 .map(([key, value]) => format(`%I = %L`, key, value));
@@ -406,7 +406,7 @@ class TableQueryBuilder extends QueryBuilder {
      */
     async add(columnData) {
         await this.model.decorator(async (client) => {
-            await this.checkForTable();
+            // await this.checkForTable();
 
             const schemaData = await this.model.getSchemaData(this.tableName);
             let { name, type, length, precision, scale, defaultValue, nullable } = columnData;
@@ -458,7 +458,7 @@ class TableQueryBuilder extends QueryBuilder {
      */
     async del(column) {
         await this.model.decorator(async (column, client) => {
-            await this.checkForTable();
+            // await this.checkForTable();
             validateSQLName(column);
 
             const schemaData = await this.model.getSchemaData(this.tableName);
@@ -479,7 +479,7 @@ class TableQueryBuilder extends QueryBuilder {
      */
     async count() {
         return await this.model.decorator(async (client) => {
-            await this.checkForTable();
+            // await this.checkForTable();
 
             const sql = format(`SELECT COUNT(*) FROM %I`, this.tableName);
 
@@ -495,7 +495,7 @@ class TableQueryBuilder extends QueryBuilder {
      */
     async first() {
         return await this.model.decorator(async (client) => {
-            await this.checkForTable();
+            // await this.checkForTable();
 
             const sql = format(`SELECT * FROM %I LIMIT 1`, this.tableName);
 
@@ -510,7 +510,7 @@ class TableQueryBuilder extends QueryBuilder {
      * @returns the last row in a given table
      */
     async last() {
-        await this.checkForTable();
+        // await this.checkForTable();
 
         const hasPrimaryKeys = await this.model.getPrimaryKeys(this.tableName);
         let obj;

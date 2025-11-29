@@ -3,7 +3,8 @@ import { Model } from "../src/ORM.js";
 
 const model = new Model({});
 
-let mockClient = Pool().connect();
+const mockClient = Pool().connect();
+const mockEnd = Pool().end;
 
 const nameFieldMock = {
     column_name: "name",
@@ -57,10 +58,12 @@ describe("Create tests table", () => {
         // That's why I need to mock client.query three times
         mockClient.query
             .mockResolvedValueOnce({ rows: [{ exists: false }] })
-            .mockResolvedValueOnce({})
-            .mockResolvedValueOnce({ rows: [{ exists: true }] });
+            .mockResolvedValueOnce({});
 
         await model.createTable("tests");
+
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: true }] });
 
         const exists = await model.exists("tests");
 
@@ -68,30 +71,19 @@ describe("Create tests table", () => {
     });
 
     test(`Create already existing table`, async () => {
-        mockClient.query.mockResolvedValueOnce({ rows: [{ exists: true }] });
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [{ exists: true }] });
 
         await expect(model.createTable("tests")).rejects.toThrow();
-    });
-});
-
-describe(`TableQueryBuilder checkForTable method`, () => {
-    test(`Table doesn't exist`, () => {
-        mockClient.query.mockResolvedValueOnce({ rows: [{ exists: false }] });
-
-        expect(
-            model.table("tests_and_something").checkForTable()
-        ).rejects.toThrow();
     });
 });
 
 describe("Module's add method tests", () => {
     test("Create name and job columns", async () => {
         mockClient.query
-            .mockResolvedValueOnce({ rows: [{ exists: true }] })
             .mockResolvedValueOnce({ rows: [] })
             .mockResolvedValueOnce({});
         mockClient.query
-            .mockResolvedValueOnce({ rows: [{ exists: true }] })
             .mockResolvedValueOnce({ rows: [nameFieldMock] })
             .mockResolvedValueOnce({});
 
@@ -118,7 +110,6 @@ describe("Module's add method tests", () => {
 
     test(`Test adding duplicate columns`, async () => {
         mockClient.query
-            .mockResolvedValueOnce({ rows: [{ exists: true }] })
             .mockResolvedValueOnce({ rows: [nameFieldMock, jobFieldMock] });
 
         await expect(
@@ -128,7 +119,6 @@ describe("Module's add method tests", () => {
 
     test(`Test adding invalid column name`, async () => {
         mockClient.query
-            .mockResolvedValueOnce({ rows: [{ exists: true }] })
             .mockResolvedValueOnce({ rows: [nameFieldMock, jobFieldMock] });
 
         await expect(
@@ -140,7 +130,6 @@ describe("Module's add method tests", () => {
 
     test(`Column with type of string but no length`, async () => {
         mockClient.query
-            .mockResolvedValueOnce({ rows: [{ exists: true }] })
             .mockResolvedValueOnce({ rows: [nameFieldMock, jobFieldMock] });
 
         await expect(
@@ -150,7 +139,6 @@ describe("Module's add method tests", () => {
 
     test(`Create int type column`, async () => {
         mockClient.query
-            .mockResolvedValueOnce({ rows: [{ exists: true }] })
             .mockResolvedValueOnce({ rows: [nameFieldMock, jobFieldMock] })
             .mockResolvedValueOnce({});
 
@@ -169,7 +157,6 @@ describe("Module's add method tests", () => {
 
     test(`Test for error when creating float type column and not providing 'scale' and 'precision'`, async () => {
         mockClient.query
-            .mockResolvedValueOnce({ rows: [{ exists: true }] })
             .mockResolvedValueOnce({
                 rows: [nameFieldMock, jobFieldMock, ageFieldMock],
             });
@@ -181,7 +168,6 @@ describe("Module's add method tests", () => {
 
     test(`Create float type column`, async () => {
         mockClient.query
-            .mockResolvedValueOnce({ rows: [{ exists: true }] })
             .mockResolvedValueOnce({
                 rows: [nameFieldMock, jobFieldMock, ageFieldMock],
             })
@@ -202,7 +188,6 @@ describe("Module's add method tests", () => {
 
     test(`Create date type column`, async () => {
         mockClient.query
-            .mockResolvedValueOnce({ rows: [{ exists: true }] })
             .mockResolvedValueOnce({
                 rows: [nameFieldMock, jobFieldMock, ageFieldMock, gpaFieldMock],
             })
@@ -231,7 +216,6 @@ describe("Module's add method tests", () => {
 
     test(`Unsupported column type`, async () => {
         mockClient.query
-            .mockResolvedValueOnce({ rows: [{ exists: true }] })
             .mockResolvedValueOnce({
                 rows: [
                     nameFieldMock,
@@ -251,7 +235,6 @@ describe("Module's add method tests", () => {
 describe(`Model's del method tests`, () => {
     test(`Delete column`, async () => {
         mockClient.query
-            .mockResolvedValueOnce({ rows: [{ exists: true }] })
             .mockResolvedValueOnce({
                 rows: [
                     nameFieldMock,
@@ -264,7 +247,6 @@ describe(`Model's del method tests`, () => {
             .mockResolvedValueOnce({});
 
         mockClient.query
-            .mockResolvedValueOnce({ rows: [{ exists: true }] })
             .mockResolvedValueOnce({
                 rows: [nameFieldMock, jobFieldMock, ageFieldMock, gpaFieldMock],
             })
@@ -288,7 +270,6 @@ describe(`Model's del method tests`, () => {
 
     test(`Invalid column name`, async () => {
         mockClient.query
-            .mockResolvedValueOnce({ rows: [{ exists: true }] })
             .mockResolvedValueOnce({
                 rows: [nameFieldMock, jobFieldMock, ageFieldMock],
             });
@@ -312,14 +293,12 @@ describe(`Model's getPrimaryKeys methods tests`, () => {
 describe("Model's insert method tests", () => {
     test("Insert into tests table values", async () => {
         mockClient.query
-            .mockResolvedValueOnce({ rows: [{ exists: true }] })
             .mockResolvedValueOnce({
                 rows: [nameFieldMock, jobFieldMock, ageFieldMock],
             })
             .mockResolvedValueOnce({});
 
         mockClient.query
-            .mockResolvedValueOnce({ rows: [{ exists: true }] })
             .mockResolvedValueOnce({
                 rows: [nameFieldMock, jobFieldMock, ageFieldMock],
             })
@@ -330,7 +309,6 @@ describe("Model's insert method tests", () => {
 
         // mocking queries for model.table("tests").returning("name").insert({ name: "Gustavo" }); call
         mockClient.query
-            .mockResolvedValueOnce({ rows: [{ exists: true }] })
             .mockResolvedValueOnce({
                 rows: [nameFieldMock, jobFieldMock, ageFieldMock],
             })
@@ -338,7 +316,6 @@ describe("Model's insert method tests", () => {
 
         // mocking queries for model.table("tests").select().get() call
         mockClient.query
-            .mockResolvedValueOnce({ rows: [{ exists: true }] })
             .mockResolvedValueOnce({
                 rows: [nameFieldMock, jobFieldMock, ageFieldMock],
             })
@@ -359,7 +336,6 @@ describe("Model's insert method tests", () => {
 
     test(`Insert into invalid table name, column`, async () => {
         mockClient.query
-            .mockResolvedValueOnce({ rows: [{ exists: true }] })
             .mockResolvedValueOnce({
                 rows: [nameFieldMock, jobFieldMock, ageFieldMock],
             });
@@ -369,7 +345,6 @@ describe("Model's insert method tests", () => {
         }).rejects.toThrow();
 
         mockClient.query
-            .mockResolvedValueOnce({ rows: [{ exists: true }] })
             .mockResolvedValueOnce({
                 rows: [nameFieldMock, jobFieldMock, ageFieldMock],
             });
@@ -381,7 +356,6 @@ describe("Model's insert method tests", () => {
 
     test(`Test for missing mandatory column in object argument`, async () => {
         mockClient.query
-            .mockResolvedValueOnce({ rows: [{ exists: true }] })
             .mockResolvedValueOnce({
                 rows: [nameFieldMock, jobFieldMock, ageFieldMock],
             })
@@ -394,7 +368,6 @@ describe("Model's insert method tests", () => {
 
     test(`Test for not existing columns provided by user`, async () => {
         mockClient.query
-            .mockResolvedValueOnce({ rows: [{ exists: true }] })
             .mockResolvedValueOnce({
                 rows: [nameFieldMock, jobFieldMock, ageFieldMock],
             })
@@ -413,7 +386,6 @@ describe("Model's insert method tests", () => {
 describe("Model's get tests", () => {
     test("get all rows from table", async () => {
         mockClient.query
-            .mockResolvedValueOnce({ rows: [{ exists: true }] })
             .mockResolvedValueOnce({ rows: [nameFieldMock, jobFieldMock, ageFieldMock] })
             .mockResolvedValueOnce({
                 rows: [
@@ -429,7 +401,6 @@ describe("Model's get tests", () => {
 
     test(`call get without select and with unknown columns`, async () => {
         mockClient.query
-            .mockResolvedValueOnce({ rows: [{ exists: true }] })
             .mockResolvedValueOnce({
                 rows: [nameFieldMock, jobFieldMock, ageFieldMock],
             });
@@ -437,7 +408,6 @@ describe("Model's get tests", () => {
         await expect(model.table("tests").get()).rejects.toThrow();
 
         mockClient.query
-            .mockResolvedValueOnce({ rows: [{ exists: true }] })
             .mockResolvedValueOnce({
                 rows: [nameFieldMock, jobFieldMock, ageFieldMock],
             });
@@ -449,7 +419,6 @@ describe("Model's get tests", () => {
 
     test(`use desc with get`, async () => {
         mockClient.query
-            .mockResolvedValueOnce({ rows: [{ exists: true }] })
             .mockResolvedValueOnce({
                 rows: [nameFieldMock, jobFieldMock, ageFieldMock],
             })
@@ -460,7 +429,6 @@ describe("Model's get tests", () => {
         const descTableContents = await model.table("tests").select().get();
 
         mockClient.query
-            .mockResolvedValueOnce({ rows: [{ exists: true }] })
             .mockResolvedValueOnce({
                 rows: [nameFieldMock, jobFieldMock, ageFieldMock],
             })
@@ -479,7 +447,6 @@ describe("Model's get tests", () => {
 
     test(`use limit with get`, async () => {
         mockClient.query
-            .mockResolvedValueOnce({ rows: [{ exists: true }] })
             .mockResolvedValueOnce({
                 rows: [nameFieldMock, jobFieldMock, ageFieldMock],
             })
@@ -490,7 +457,6 @@ describe("Model's get tests", () => {
         const tableContents = await model.table("tests").select().get();
 
         mockClient.query
-            .mockResolvedValueOnce({ rows: [{ exists: true }] })
             .mockResolvedValueOnce({
                 rows: [nameFieldMock, jobFieldMock, ageFieldMock],
             })
@@ -509,7 +475,6 @@ describe("Model's get tests", () => {
 
     test(`use orderBy with get`, async () => {
         mockClient.query
-            .mockResolvedValueOnce({ rows: [{ exists: true }] })
             .mockResolvedValueOnce({
                 rows: [nameFieldMock, jobFieldMock, ageFieldMock],
             })
@@ -528,7 +493,6 @@ describe("Model's get tests", () => {
 
     test("get specific rows from table", async () => {
         mockClient.query
-            .mockResolvedValueOnce({ rows: [{ exists: true }] })
             .mockResolvedValueOnce({
                 rows: [nameFieldMock, jobFieldMock, ageFieldMock],
             })
@@ -543,7 +507,6 @@ describe("Model's get tests", () => {
             .get();
 
         mockClient.query
-            .mockResolvedValueOnce({ rows: [{ exists: true }] })
             .mockResolvedValueOnce({
                 rows: [nameFieldMock, jobFieldMock, ageFieldMock],
             })
@@ -573,7 +536,6 @@ describe("Model's get tests", () => {
 describe(`Models countRows method tests`, () => {
     test(`Count rows`, async () => {
         mockClient.query
-            .mockResolvedValueOnce({ rows: [{ exists: true }] })
             .mockResolvedValueOnce({
                 rows: [{ count: users.length }]
             });
@@ -587,7 +549,6 @@ describe(`Models countRows method tests`, () => {
 describe(`Models first method tests`, () => {
     test(`Get the first item`, async () => {
         mockClient.query
-            .mockResolvedValueOnce({ rows: [{ exists: true }] })
             .mockResolvedValueOnce({
                 rows: [nameFieldMock, jobFieldMock, ageFieldMock],
             })
@@ -598,7 +559,6 @@ describe(`Models first method tests`, () => {
         const allItems = await model.table("tests").select().get();
 
         mockClient.query
-            .mockResolvedValueOnce({ rows: [{ exists: true }] })
             .mockResolvedValueOnce({
                 rows: users.filter((u) => u.name === "Micah"),
             });
@@ -612,7 +572,6 @@ describe(`Models first method tests`, () => {
 describe(`Models last method tests`, () => {
     test(`Get the last item`, async () => {
         mockClient.query
-            .mockResolvedValueOnce({ rows: [{ exists: true }] })
             .mockResolvedValueOnce({
                 rows: [nameFieldMock, jobFieldMock, ageFieldMock],
             })
@@ -623,9 +582,7 @@ describe(`Models last method tests`, () => {
         const allItems = await model.table("tests").select().get();
 
         mockClient.query
-            .mockResolvedValueOnce({ rows: [{ exists: true }] })
             .mockResolvedValueOnce({ rows: [] })
-            .mockResolvedValueOnce({ rows: [{ exists: true }] })
             .mockResolvedValueOnce({
                 rows: [nameFieldMock, jobFieldMock, ageFieldMock],
             })
@@ -640,7 +597,6 @@ describe(`Models last method tests`, () => {
 
     test(`Get the last item with primary keys`, async () => {
         mockClient.query
-            .mockResolvedValueOnce({ rows: [{ exists: true }] })
             .mockResolvedValueOnce({
                 rows: [nameFieldMock, jobFieldMock, ageFieldMock],
             })
@@ -651,7 +607,6 @@ describe(`Models last method tests`, () => {
         const allItems = await model.table("tests").select().get();
 
         mockClient.query
-            .mockResolvedValueOnce({ rows: [{ exists: true }] })
             .mockResolvedValueOnce({ rows: [ "age" ] }) // Found a primary key
             .mockResolvedValueOnce({
                 rows: users.filter((u) => u.name === "Gustavo" && u.age === null),
@@ -666,7 +621,6 @@ describe(`Models last method tests`, () => {
 describe(`Models update method tests`, () => {
     test(`Update where age is 29`, async () => {
         mockClient.query
-            .mockResolvedValueOnce({ rows: [{ exists: true }] })
             .mockResolvedValueOnce({
                 rows: [nameFieldMock, jobFieldMock, ageFieldMock],
             })
@@ -686,7 +640,6 @@ describe(`Models update method tests`, () => {
         updatedUser.age = 31;
 
         mockClient.query
-            .mockResolvedValueOnce({ rows: [{ exists: true }] })
             .mockResolvedValueOnce({
                 rows: [updatedUser]
             });
@@ -698,7 +651,6 @@ describe(`Models update method tests`, () => {
             .update({ age: 31 });
 
         mockClient.query
-            .mockResolvedValueOnce({ rows: [{ exists: true }] })
             .mockResolvedValueOnce({
                 rows: [nameFieldMock, jobFieldMock, ageFieldMock],
             })
@@ -731,7 +683,6 @@ describe(`Models update method tests`, () => {
 describe(`Model's delete method tests`, () => {
     test(`Delete rows`, async () => {
         mockClient.query
-            .mockResolvedValueOnce({ rows: [{ exists: true }] })
             .mockResolvedValueOnce({});
 
         await model
@@ -741,7 +692,6 @@ describe(`Model's delete method tests`, () => {
             .delete();
 
         mockClient.query
-            .mockResolvedValueOnce({ rows: [{ exists: true }] })
             .mockResolvedValueOnce({
                 rows: [nameFieldMock, jobFieldMock, ageFieldMock],
             })
@@ -776,5 +726,13 @@ describe("Delete tests table", () => {
             .mockResolvedValueOnce({ rows: [{ exists: false }] });
 
         await expect(model.deleteTable("tests")).rejects.toThrow();
+    });
+});
+
+describe(`Close method tests`, () => {
+    test(`Close all connections to postgreSQL`, async () => {
+        await model.close();
+
+        expect(mockEnd).toHaveBeenCalled();
     });
 });
