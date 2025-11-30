@@ -1,3 +1,5 @@
+import { jest } from "@jest/globals";
+
 const mockClient = {
     query: jest.fn(() => {}),
     release: jest.fn(() => {}),

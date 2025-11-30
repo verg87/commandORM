@@ -1,5 +1,8 @@
+import { jest } from "@jest/globals";
 import { Pool } from "pg";
 import { Model } from "../src/ORM.js";
+
+jest.useFakeTimers();
 
 const model = new Model({});
 

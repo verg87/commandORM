@@ -1,6 +1,8 @@
 {
   "collectCoverage": true,
-  "transform": {
-    "^.+\\.(js|jsx)$": "babel-jest"
+  "transform": {},
+  "testEnvironment": "node",
+  "moduleNameMapper": {
+    "^pg$": "<rootDir>/__mocks__/pg.js"
   }
 }
