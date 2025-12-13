@@ -1,8 +1,11 @@
 import { Pool } from 'pg';
-import format from 'pg-format';
+import format, { string } from 'pg-format';
 import { QueryBuilder } from './queryBuilder.js';
 
 const validateSQLName = (...args) => {
+    if (!args.every((arg) => typeof arg === 'string')) 
+        throw new Error(`Column/Table names must be a string`);
+
     if (!args.every((arg) => /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(arg))) 
         throw new Error(`Column/Table names can consist of only upper or lower cased letters, underscores and numbers`);
 }
@@ -290,8 +293,6 @@ class TableQueryBuilder extends QueryBuilder {
      */
     async get() {
         return await this.model.decorator(async (client) => {
-            // await this.checkForTable();
-
             if (!this.sql.select)
                 throw new Error(`Columns haven't been selected`);
 
@@ -321,7 +322,6 @@ class TableQueryBuilder extends QueryBuilder {
      */
     async delete() {
         return await this.model.decorator(async (client) => {
-            // await this.checkForTable();
 
             const { where, returning } = this.sql;
             const sql = format(`DELETE FROM %I %s %s;`, this.tableName, where, returning);
@@ -339,8 +339,6 @@ class TableQueryBuilder extends QueryBuilder {
      */
     async insert(values) {
         return await this.model.decorator(async (values, client) => {
-            // await this.checkForTable();
-
             const rows = Array.isArray(values) ? values : [values];
 
             const schemaData = await this.model.getSchemaData(this.tableName);
@@ -378,8 +376,6 @@ class TableQueryBuilder extends QueryBuilder {
      */
     async update(values) {
         return await this.model.decorator(async (values, client) => {
-            // await this.checkForTable();
-
             const set = Object.entries(values)
                 .map(([key, value]) => format(`%I = %L`, key, value));
 
@@ -406,8 +402,6 @@ class TableQueryBuilder extends QueryBuilder {
      */
     async add(columnData) {
         await this.model.decorator(async (client) => {
-            // await this.checkForTable();
-
             const schemaData = await this.model.getSchemaData(this.tableName);
             let { name, type, length, precision, scale, defaultValue, nullable } = columnData;
             const columnNames = schemaData.map((col) => col['column_name']);
@@ -458,7 +452,6 @@ class TableQueryBuilder extends QueryBuilder {
      */
     async del(column) {
         await this.model.decorator(async (column, client) => {
-            // await this.checkForTable();
             validateSQLName(column);
 
             const schemaData = await this.model.getSchemaData(this.tableName);
@@ -475,18 +468,103 @@ class TableQueryBuilder extends QueryBuilder {
 
     /**
      * Counts the number of rows in a given table
+     * @param {string} [column] The name of the column to count.
+     * If omitted "*" is used.
      * @returns the number of rows in the table
      */
-    async count() {
-        return await this.model.decorator(async (client) => {
-            // await this.checkForTable();
+    async count(column) {
+        return await this.model.decorator(async (column, client) => {
+            if (column) {
+                validateSQLName(column);
+            } else {
+                column = "*"
+            }
 
-            const sql = format(`SELECT COUNT(*) FROM %I`, this.tableName);
+            const sql = format(`SELECT COUNT(%s) FROM %I`, column, this.tableName)
 
             const { rows } = await client.query(sql);
 
             return parseInt(rows[0].count);
-        })();
+        })(column);
+    }
+
+    /**
+     * Sums up all values in a given column
+     * @param {string} column The name of the column to sum.
+     * @returns {Promise<number>} A promise that resolves to the sum of the values in the specified column.
+     */
+    async sum(column) {
+        return await this.model.decorator(async (column, client) => {
+            validateSQLName(column);
+
+            const sql = format(`SELECT SUM(%s) FROM %I`, column, this.tableName);
+
+            const { rows } = await client.query(sql);
+
+            return parseInt(rows[0].sum);
+        })(column);
+    }
+
+    /**
+     * Averages out values in a given column
+     * @param {string} column The name of the column to average out.
+     * @param {number} [precision] The number of decimal places. If omitted, the result will be returned as is. 
+     * @returns {Promise<number>} A promise that resolves to the average of the values in the specified column.
+     * @throws {Error} If the precision is not within the range of 0-100.
+     */
+    async avg(column, precision) {
+        return await this.model.decorator(async (column, precision, client) => {
+            validateSQLName(column);
+
+            if (typeof precision === "number" && (precision > 100 || precision < 0))
+                throw new Error("Precision must in range of 0-100");
+
+            const sql = format(`SELECT AVG(%s) FROM %I`, column, this.tableName);
+
+            const { rows } = await client.query(sql);
+
+            if (typeof precision === "number") {
+                return parseFloat(parseFloat(rows[0].avg).toFixed(parseInt(precision)))
+            }
+
+            return parseFloat(rows[0].avg);
+        })(column, precision);
+    }
+
+    /**
+     * Finds the lowest column value.
+     * If a given column has data type of string then it finds the value based on alphabetical order. 
+     * @param {string} column The name of the column.
+     * @returns {Promise<number|string>} A promise that resolves to the lowest value in the specified column.
+     */
+    async min(column) {
+        return await this.model.decorator(async (column, client) => {
+            validateSQLName(column);
+
+            const sql = format(`SELECT MIN(%s) FROM %I`, column, this.tableName);
+
+            const { rows } = await client.query(sql);
+
+            return /^\d+(\.\d+)?$/.test(rows[0].min) ? parseFloat(rows[0].min) : rows[0].min;
+        })(column);
+    }
+
+    /**
+     * Finds the largest column value.
+     * If a given column has data type of string then it finds the value based on alphabetical order. 
+     * @param {string} column The name of the column.
+     * @returns {Promise<number|string>} A promise that resolves to the largest value in the specified column.
+     */
+    async max(column) {
+        return await this.model.decorator(async (column, client) => {
+            validateSQLName(column);
+
+            const sql = format(`SELECT MAX(%s) FROM %I`, column, this.tableName);
+
+            const { rows } = await client.query(sql);
+
+            return /^\d+(\.\d+)?$/.test(rows[0].max) ? parseFloat(rows[0].max) : rows[0].max;
+        })(column);
     }
 
     /**
@@ -495,8 +573,6 @@ class TableQueryBuilder extends QueryBuilder {
      */
     async first() {
         return await this.model.decorator(async (client) => {
-            // await this.checkForTable();
-
             const sql = format(`SELECT * FROM %I LIMIT 1`, this.tableName);
 
             const { rows } = await client.query(sql);
@@ -510,8 +586,6 @@ class TableQueryBuilder extends QueryBuilder {
      * @returns the last row in a given table
      */
     async last() {
-        // await this.checkForTable();
-
         const hasPrimaryKeys = await this.model.getPrimaryKeys(this.tableName);
         let obj;
 
