@@ -1,14 +1,16 @@
-import { Pool } from 'pg';
-import format, { string } from 'pg-format';
-import { QueryBuilder } from './queryBuilder.js';
+import { Pool } from "pg";
+import format from "pg-format";
+import { QueryBuilder } from "./queryBuilder.js";
 
 const validateSQLName = (...args) => {
-    if (!args.every((arg) => typeof arg === 'string')) 
+    if (!args.every((arg) => typeof arg === "string"))
         throw new Error(`Column/Table names must be a string`);
 
-    if (!args.every((arg) => /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(arg))) 
-        throw new Error(`Column/Table names can consist of only upper or lower cased letters, underscores and numbers`);
-}
+    if (!args.every((arg) => /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(arg)))
+        throw new Error(
+            `Column/Table names can consist of only upper or lower cased letters, underscores and numbers`
+        );
+};
 
 class Model {
     /**
@@ -19,12 +21,12 @@ class Model {
         this.schemaName = config._schemaName;
     }
 
-    /** 
+    /**
      * Wrapper method to remove the constant try and finally blocks
      * @param {function} fn The asynchronous model method to be decorated.                                                                                                                     │
      * It will receive a `client` object as its last argument.                                                                                                                                 │
      * @returns {function} An asynchronous function that, when called, will                                                                                                                    │
-     * execute the decorated method with a connected database client.    
+     * execute the decorated method with a connected database client.
      */
     decorator(fn) {
         return async (...args) => {
@@ -37,7 +39,7 @@ class Model {
             } finally {
                 client.release();
             }
-        }
+        };
     }
 
     /**
@@ -106,7 +108,7 @@ class Model {
                     AND table_name = $2
                 );
             `;
-          
+
             const { rows } = await client.query(sql, [this.schemaName, tableName]);
             return rows[0].exists;
         })(tableName);
@@ -120,9 +122,9 @@ class Model {
      */
     async createTable(tableName) {
         await this.decorator(async (tableName, client) => {
-            if ((await this.exists(tableName)))
+            if (await this.exists(tableName))
                 throw new Error(`The "${tableName}" table already exists`);
-            
+
             validateSQLName(tableName);
 
             const sql = format(`CREATE TABLE %I ()`, tableName);
@@ -139,7 +141,7 @@ class Model {
         await this.decorator(async (tableName, client) => {
             if (!(await this.exists(tableName)))
                 throw new Error(`The "${tableName}" table doesn't exist`);
-            
+
             validateSQLName(tableName);
 
             const sql = format(`DROP TABLE %I`, tableName);
@@ -169,7 +171,16 @@ class TableQueryBuilder extends QueryBuilder {
         super();
         this.model = model;
         this.tableName = tableName;
-        this.sql = {delete: '', select: '', where: '', order: '', limit: '', returning: ''}; 
+        this.sql = {
+            delete: "",
+            select: "",
+            join: "",
+            on: "",
+            where: "",
+            order: "",
+            limit: "",
+            returning: "",
+        };
     }
 
     /**
@@ -178,8 +189,139 @@ class TableQueryBuilder extends QueryBuilder {
      * @returns {TableQueryBuilder} The current instance of the TableQueryBuilder.
      */
     select(...columns) {
-        this._select = columns?.length ? columns.filter(col => col !== '*') : ['*'];
+        this._select = columns?.length
+            ? columns.filter((col) => col !== "*")
+            : ["*"];
         this.sql.select = format(`SELECT %s FROM %I`, this._select, this.tableName);
+        return this;
+    }
+
+    /**
+     * Adds an INNER JOIN clause to the query.
+     * @param {string} table Table to perform inner join with.
+     * @param {any[] | function[]} args On what match or matches to perform the join.
+     * Can accept function as a parameter. Note that the callback must not be an arrow function
+     * @returns {TableQueryBuilder} The current instance of the TableQueryBuilder.
+     */
+    innerJoin(table, ...args) {
+        this.sql.join = format(`INNER JOIN %I`, table);
+        const self = this;
+
+        if (args[0] instanceof Function && args.length === 1) {
+            const joinConditionContext = {
+                sql: self.sql,
+                on: self.on,
+                onOr: self.onOr,
+                onAnd: self.onAnd,
+            };
+
+            args[0].apply(joinConditionContext);
+        } else if (args.length) {
+            this.on(...args);
+        }
+
+        return this;
+    }
+
+    /**
+     * Creates a condition for the JOIN clause.
+     * @param {...string} args The arguments for the JOIN clause.
+     * @returns {TableQueryBuilder} The current instance of the TableQueryBuilder.
+     */
+    on(...args) {
+        const operators = ["=", "!=", "<>", ">=", "<=", "<", ">"];
+
+        let [leftTable, leftColumn] = args[0]?.trim()?.split(".") ?? [];
+        let [rightTable, rightColumn] = args[2]?.trim()?.split(".") ?? [];
+
+        if (operators.includes(args[1]) && args.length === 3) {
+            this.sql.on = format(
+                `ON %I.%I %s %I.%I`,
+                leftTable,
+                leftColumn,
+                args[1],
+                rightTable,
+                rightColumn
+            );
+        } else if (Array.isArray(args[1]) && args.length === 2) {
+            this.sql.on = format(`ON %I.%I IN (%L)`, leftTable, leftColumn, args[1]);
+        } else if (
+            typeof args[0] === "string" &&
+            typeof args[1] === "string" &&
+            args.length === 2
+        ) {
+            [rightTable, rightColumn] = args[1].trim().split(".");
+
+            this.sql.on = format(
+                `ON %I.%I = %I.%I`,
+                leftTable,
+                leftColumn,
+                rightTable,
+                rightColumn
+            );
+        } else if (
+            typeof args[0] === "string" &&
+            typeof args[1] === "number" &&
+            args.length === 2
+        ) {
+            this.sql.on = format(
+                `ON %I.%I = %s`,
+                leftTable,
+                leftColumn,
+                args[1]
+            );
+        } else if (
+            typeof args[0] === "string" &&
+            args[1] === null &&
+            args.length === 2
+        ) {
+            this.sql.on = format(`ON %I.%I IS NULL`, leftTable, leftColumn);
+        } else {
+            throw new Error("Invalid arguments for on method");
+        }
+
+        return this;
+    }
+
+    /**
+     * Adds an OR condition to the ON clause.
+     * @param {...any} args The arguments for the OR condition.
+     * @returns {TableQueryBuilder} The current instance of the TableQueryBuilder.
+     * @throws {Error} If the `on` method has not been called first.
+     */
+    onOr(...args) {
+        if (!this.sql.on)
+            throw new Error(
+                `You can't call "onOr" method without first calling "on" method`
+            );
+
+        const onToAdd = this.sql.on + " OR ";
+        this.on(...args);
+
+        // slice(3) - we are slicing off the "ON " clause since it's length is 3(with a whitespace)
+        this.sql.on = onToAdd + this.sql.on.slice(3);
+
+        return this;
+    }
+
+    /**
+     * Adds an AND condition to the ON clause.
+     * @param {...any} args The arguments for the AND condition.
+     * @returns {TableQueryBuilder} The current instance of the TableQueryBuilder.
+     * @throws {Error} If the `on` method has not been called first.
+     */
+    onAnd(...args) {
+        if (!this.sql.on)
+            throw new Error(
+                `You can't call "onAnd" method without first calling "on" method`
+            );
+
+        const onToAdd = this.sql.on + " AND ";
+        this.on(...args);
+
+        // slice(3) - we are slicing off the "ON " clause since it's length is 3(with a whitespace)
+        this.sql.on = onToAdd + this.sql.on.slice(3);
+
         return this;
     }
 
@@ -189,21 +331,30 @@ class TableQueryBuilder extends QueryBuilder {
      * @returns {TableQueryBuilder} The current instance of the TableQueryBuilder.
      */
     where(...args) {
-        const operators = ['=', '!=', '<>', '>=', '<=', '<', '>'];
+        const operators = ["=", "!=", "<>", ">=", "<=", "<", ">"];
         if (operators.includes(args[1]) && args.length === 3) {
-            this.sql.where = format(`WHERE %I %s %L`, args[0].trim(), args[1], args[2]);
+            this.sql.where = format(
+                `WHERE %I %s %L`,
+                args[0].trim(),
+                args[1],
+                args[2]
+            );
         } else if (Array.isArray(args[1]) && args.length === 2) {
             this.sql.where = format(`WHERE %I IN (%L)`, args[0].trim(), args[1]);
         } else if (
-            typeof args[0] === 'string' && 
-            ['string', 'number'].includes(typeof args[1]) 
-            && args.length === 2
+            typeof args[0] === "string" &&
+            ["string", "number"].includes(typeof args[1]) &&
+            args.length === 2
         ) {
             this.sql.where = format(`WHERE %I = %L`, args[0].trim(), args[1]);
-        } else if (typeof args[0] === 'string' && args[1] === null && args.length === 2) {
+        } else if (
+            typeof args[0] === "string" &&
+            args[1] === null &&
+            args.length === 2
+        ) {
             this.sql.where = format(`WHERE %I IS NULL`, args[0]);
         } else {
-            throw new Error('Invalid arguments for where method');
+            throw new Error("Invalid arguments for where method");
         }
 
         return this;
@@ -217,11 +368,14 @@ class TableQueryBuilder extends QueryBuilder {
      */
     or(...args) {
         if (!this.sql.where)
-            throw new Error(`You can't call "or" method without first calling where method`);
+            throw new Error(
+                `You can't call "or" method without first calling where method`
+            );
 
-        const whereToAdd = this.sql.where + ' OR ';
+        const whereToAdd = this.sql.where + " OR ";
         this.where(...args);
 
+        // slice(6) - we are slicing off the "WHERE " clause since it's length is 6(with a whitespace)
         this.sql.where = whereToAdd + this.sql.where.slice(6);
 
         return this;
@@ -235,11 +389,14 @@ class TableQueryBuilder extends QueryBuilder {
      */
     and(...args) {
         if (!this.sql.where)
-            throw new Error(`You can't call "and" method without first calling where method`);
+            throw new Error(
+                `You can't call "and" method without first calling where method`
+            );
 
-        const whereToAdd = this.sql.where + ' AND ';
+        const whereToAdd = this.sql.where + " AND ";
         this.where(...args);
 
+        // slice(6) - we are slicing off the "WHERE " clause since it's length is 6(with a whitespace)
         this.sql.where = whereToAdd + this.sql.where.slice(6);
 
         return this;
@@ -251,7 +408,10 @@ class TableQueryBuilder extends QueryBuilder {
      * @returns {TableQueryBuilder} The current instance of the TableQueryBuilder.
      */
     returning(...columns) {
-        this.sql.returning = format(`RETURNING %s`, columns.length ? columns.filter(v => v !== '*') : '*');
+        this.sql.returning = format(
+            `RETURNING %s`,
+            columns.length ? columns.filter((v) => v !== "*") : "*"
+        );
         return this;
     }
 
@@ -261,8 +421,10 @@ class TableQueryBuilder extends QueryBuilder {
      * @returns {TableQueryBuilder} The current instance of the TableQueryBuilder.
      */
     orderBy(...columns) {
-        this._order = columns?.length ? columns.filter(col => col !== '*') : [];
-        this.sql.order = this._order.length ? format(`ORDER BY %s`, this._order) : '';
+        this._order = columns?.length ? columns.filter((col) => col !== "*") : [];
+        this.sql.order = this._order.length
+            ? format(`ORDER BY %s`, this._order)
+            : "";
         return this;
     }
 
@@ -293,24 +455,29 @@ class TableQueryBuilder extends QueryBuilder {
      */
     async get() {
         return await this.model.decorator(async (client) => {
-            if (!this.sql.select)
-                throw new Error(`Columns haven't been selected`);
+            if (!this.sql.select) throw new Error(`Columns haven't been selected`);
 
             const schemaData = await this.model.getSchemaData(this.tableName);
-            const columns = schemaData.map(row => row.column_name);
+            const columns = schemaData.map((row) => row.column_name);
 
-            if (!this._select.every((col) => columns.includes(col)) && this._select[0] !== '*')
-                throw new Error(`Some of the selected columns don't exist in the "${this.tableName}" table`);
+            if (
+                !this._select.every((col) => columns.includes(col)) &&
+                this._select[0] !== "*" &&
+                !this.sql.join
+            )
+                throw new Error(
+                    `Some of the selected columns don't exist in the "${this.tableName}" table`
+                );
 
-            const sql = Object.values(this.sql)
-                .filter((value) => value)
-                .join(' ')
-                .trim() + ';';
+            const sql =
+                Object.values(this.sql)
+                    .filter((value) => value)
+                    .join(" ")
+                    .trim() + ";";
 
             const res = (await client.query(sql)).rows;
 
-            if (this._desc)
-                res.reverse();
+            if (this._desc) res.reverse();
 
             return res;
         })();
@@ -322,9 +489,13 @@ class TableQueryBuilder extends QueryBuilder {
      */
     async delete() {
         return await this.model.decorator(async (client) => {
-
             const { where, returning } = this.sql;
-            const sql = format(`DELETE FROM %I %s %s;`, this.tableName, where, returning);
+            const sql = format(
+                `DELETE FROM %I %s %s;`,
+                this.tableName,
+                where,
+                returning
+            );
 
             return (await client.query(sql)).rows;
         })();
@@ -342,28 +513,39 @@ class TableQueryBuilder extends QueryBuilder {
             const rows = Array.isArray(values) ? values : [values];
 
             const schemaData = await this.model.getSchemaData(this.tableName);
-            const columns = schemaData.map(col => col.column_name);
+            const columns = schemaData.map((col) => col.column_name);
 
             const mandatoryColumns = schemaData
-                .filter(col => col.is_nullable === 'NO' && !col.column_default)
-                .map(col => col.column_name);
+                .filter((col) => col.is_nullable === "NO" && !col.column_default)
+                .map((col) => col.column_name);
 
-            const sortedValues = rows.map(values => {
+            const sortedValues = rows.map((values) => {
                 const valueKeys = Object.keys(values);
                 validateSQLName(...valueKeys);
 
                 if (!valueKeys.every((col) => columns.includes(col)))
-                    throw new Error(`Some of the provided columns don't exist in table "${this.tableName}"`);
+                    throw new Error(
+                        `Some of the provided columns don't exist in table "${this.tableName}"`
+                    );
 
-                if (!mandatoryColumns.every((col) => valueKeys.includes(col) && values[col]))
+                if (
+                    !mandatoryColumns.every(
+                        (col) => valueKeys.includes(col) && values[col]
+                    )
+                )
                     throw new Error(`Missing mandatory columns: ${mandatoryColumns}`);
-            
-                return columns.map(col => values[col] || null);
+
+                return columns.map((col) => values[col] || null);
             });
 
-            const sqlValuesString = sortedValues.map((row) => format(`(%L)`, row))
+            const sqlValuesString = sortedValues.map((row) => format(`(%L)`, row));
 
-            const sql = format(`INSERT INTO %I VALUES %s %s;`, this.tableName, sqlValuesString, this.sql.returning);
+            const sql = format(
+                `INSERT INTO %I VALUES %s %s;`,
+                this.tableName,
+                sqlValuesString,
+                this.sql.returning
+            );
 
             return (await client.query(sql)).rows;
         })(values);
@@ -376,12 +558,19 @@ class TableQueryBuilder extends QueryBuilder {
      */
     async update(values) {
         return await this.model.decorator(async (values, client) => {
-            const set = Object.entries(values)
-                .map(([key, value]) => format(`%I = %L`, key, value));
+            const set = Object.entries(values).map(([key, value]) =>
+                format(`%I = %L`, key, value)
+            );
 
             const { where, returning } = this.sql;
-            const sql = format(`UPDATE %I SET %s %s %s;`, this.tableName, set, where, returning);
-            
+            const sql = format(
+                `UPDATE %I SET %s %s %s;`,
+                this.tableName,
+                set,
+                where,
+                returning
+            );
+
             return (await client.query(sql)).rows;
         })(values);
     }
@@ -403,8 +592,9 @@ class TableQueryBuilder extends QueryBuilder {
     async add(columnData) {
         await this.model.decorator(async (client) => {
             const schemaData = await this.model.getSchemaData(this.tableName);
-            let { name, type, length, precision, scale, defaultValue, nullable } = columnData;
-            const columnNames = schemaData.map((col) => col['column_name']);
+            let { name, type, length, precision, scale, defaultValue, nullable } =
+                columnData;
+            const columnNames = schemaData.map((col) => col["column_name"]);
 
             type = type.toLowerCase();
 
@@ -415,32 +605,40 @@ class TableQueryBuilder extends QueryBuilder {
             }
 
             const sqlType = (() => {
-                switch(type) {
+                switch (type) {
                     case "string": {
-                        if (!length) throw new Error('string type requires max length');
+                        if (!length) throw new Error("string type requires max length");
 
                         return `VARCHAR(${length})`;
                     }
                     case "float": {
-                        if (!precision || !scale) throw new Error('float type requires max and min');
+                        if (!precision || !scale)
+                            throw new Error("float type requires max and min");
 
                         return `DECIMAL(${precision}, ${scale})`;
                     }
-                    case "int":;
-                    case "timestamp":;
-                    case "time":;
+                    case "int":
+                    case "timestamp":
+                    case "time":
                     case "date":
                         return type.toUpperCase();
-                    default: 
-                        throw new Error(`Unsupported data type: ${type['name']}`);
+                    default:
+                        throw new Error(`Unsupported data type: ${type["name"]}`);
                 }
             })();
-            
-            const defaultClause = defaultValue !== undefined ? format(`DEFAULT %L`, defaultValue) : '';
+
+            const defaultClause =
+                defaultValue !== undefined ? format(`DEFAULT %L`, defaultValue) : "";
             const nullClause = nullable === false ? "NOT NULL" : "";
 
-            const sql = format(`ALTER TABLE %I ADD COLUMN %I %s %s %s;`, 
-                this.tableName, name, sqlType, nullClause, defaultClause);
+            const sql = format(
+                `ALTER TABLE %I ADD COLUMN %I %s %s %s;`,
+                this.tableName,
+                name,
+                sqlType,
+                nullClause,
+                defaultClause
+            );
 
             await client.query(sql);
         })();
@@ -455,12 +653,18 @@ class TableQueryBuilder extends QueryBuilder {
             validateSQLName(column);
 
             const schemaData = await this.model.getSchemaData(this.tableName);
-            const columns = schemaData.map(col => col.column_name);
+            const columns = schemaData.map((col) => col.column_name);
 
             if (!columns.includes(column))
-                throw new Error(`There's no such column as "${column}" in the table "${this.tableName}"`);
+                throw new Error(
+                    `There's no such column as "${column}" in the table "${this.tableName}"`
+                );
 
-            const sql = format(`ALTER TABLE %I DROP COLUMN %I`, this.tableName, column);
+            const sql = format(
+                `ALTER TABLE %I DROP COLUMN %I`,
+                this.tableName,
+                column
+            );
 
             await client.query(sql);
         })(column);
@@ -477,10 +681,10 @@ class TableQueryBuilder extends QueryBuilder {
             if (column) {
                 validateSQLName(column);
             } else {
-                column = "*"
+                column = "*";
             }
 
-            const sql = format(`SELECT COUNT(%s) FROM %I`, column, this.tableName)
+            const sql = format(`SELECT COUNT(%s) FROM %I`, column, this.tableName);
 
             const { rows } = await client.query(sql);
 
@@ -508,7 +712,7 @@ class TableQueryBuilder extends QueryBuilder {
     /**
      * Averages out values in a given column
      * @param {string} column The name of the column to average out.
-     * @param {number} [precision] The number of decimal places. If omitted, the result will be returned as is. 
+     * @param {number} [precision] The number of decimal places. If omitted, the result will be returned as is.
      * @returns {Promise<number>} A promise that resolves to the average of the values in the specified column.
      * @throws {Error} If the precision is not within the range of 0-100.
      */
@@ -524,7 +728,7 @@ class TableQueryBuilder extends QueryBuilder {
             const { rows } = await client.query(sql);
 
             if (typeof precision === "number") {
-                return parseFloat(parseFloat(rows[0].avg).toFixed(parseInt(precision)))
+                return parseFloat(parseFloat(rows[0].avg).toFixed(parseInt(precision)));
             }
 
             return parseFloat(rows[0].avg);
@@ -533,7 +737,7 @@ class TableQueryBuilder extends QueryBuilder {
 
     /**
      * Finds the lowest column value.
-     * If a given column has data type of string then it finds the value based on alphabetical order. 
+     * If a given column has data type of string then it finds the value based on alphabetical order.
      * @param {string} column The name of the column.
      * @returns {Promise<number|string>} A promise that resolves to the lowest value in the specified column.
      */
@@ -545,13 +749,15 @@ class TableQueryBuilder extends QueryBuilder {
 
             const { rows } = await client.query(sql);
 
-            return /^\d+(\.\d+)?$/.test(rows[0].min) ? parseFloat(rows[0].min) : rows[0].min;
+            return /^\d+(\.\d+)?$/.test(rows[0].min)
+                ? parseFloat(rows[0].min)
+                : rows[0].min;
         })(column);
     }
 
     /**
      * Finds the largest column value.
-     * If a given column has data type of string then it finds the value based on alphabetical order. 
+     * If a given column has data type of string then it finds the value based on alphabetical order.
      * @param {string} column The name of the column.
      * @returns {Promise<number|string>} A promise that resolves to the largest value in the specified column.
      */
@@ -563,7 +769,9 @@ class TableQueryBuilder extends QueryBuilder {
 
             const { rows } = await client.query(sql);
 
-            return /^\d+(\.\d+)?$/.test(rows[0].max) ? parseFloat(rows[0].max) : rows[0].max;
+            return /^\d+(\.\d+)?$/.test(rows[0].max)
+                ? parseFloat(rows[0].max)
+                : rows[0].max;
         })(column);
     }
 
@@ -591,8 +799,11 @@ class TableQueryBuilder extends QueryBuilder {
 
         if (hasPrimaryKeys.length) {
             obj = await this.model.decorator(async (client) => {
-                const sql = format(`SELECT * FROM %I ORDER BY (%s) DESC LIMIT 1`, 
-                    this.tableName, hasPrimaryKeys.map(col => col.column_name));
+                const sql = format(
+                    `SELECT * FROM %I ORDER BY (%s) DESC LIMIT 1`,
+                    this.tableName,
+                    hasPrimaryKeys.map((col) => col.column_name)
+                );
 
                 return await client.query(sql);
             })();
