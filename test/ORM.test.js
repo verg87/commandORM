@@ -50,6 +50,12 @@ const users = [
     { name: "Gustavo", age: null, job: null },
 ];
 
+const joinedUsers = [
+    { name: "Micah", address: "Some city" },
+    { name: "Gustavo", address: "Another city" },
+    { name: "Gustavo", address: "Yet another city" },
+];
+
 beforeEach(() => {
     mockClient.query.mockReset();
 })
@@ -531,6 +537,111 @@ describe("Model's get tests", () => {
     test(`Use 'and' and 'or' methods without calling where first`, () => {
         expect(() => model.table("tests").select().and("job", null)).toThrow();
         expect(() => model.table("tests").select().or("age", null)).toThrow();
+    });
+});
+
+describe(`Model's innerJoin method tests`, () => {
+    test(`Use innerJoin with args`, async () => {
+        mockClient.query
+            .mockResolvedValueOnce({
+                rows: [nameFieldMock, jobFieldMock, ageFieldMock],
+            })
+            .mockResolvedValueOnce({
+                rows: joinedUsers,
+            });
+
+        const rows = await model.table("tests")
+            .select("name", "address")
+            .innerJoin("users_addresses", "tests.user", 'users_addresses.user')
+            .get();
+
+        expect(rows).toStrictEqual(joinedUsers);
+    });
+
+    test(`Use innerJoin with a function`, async () => {
+        mockClient.query
+            .mockResolvedValueOnce({
+                rows: [nameFieldMock, jobFieldMock, ageFieldMock],
+            })
+            .mockResolvedValueOnce({
+                rows: joinedUsers,
+            });
+
+        const rows = await model.table("tests")
+            .select("name", "address")
+            .innerJoin("users_addresses", function() {
+                this.on("tests.user", "=", "users_addresses.user")
+                    .onOr("tests.user", ["Micah", "Gustavo"]);
+            })
+            .get();
+
+        expect(rows).toStrictEqual(joinedUsers);
+    });
+
+    test(`Use innerJoin with seperate "on" method call`, async () => {
+        const joinedSelectedUsers = joinedUsers.filter((u) => u.name === "Micah");
+
+        mockClient.query
+            .mockResolvedValueOnce({
+                rows: [nameFieldMock, jobFieldMock, ageFieldMock],
+            })
+            .mockResolvedValueOnce({
+                rows: joinedSelectedUsers,
+            });
+
+        const rows = await model.table("tests")
+            .select("name", "address")
+            .innerJoin("users_addresses")
+            .on("tests.user", "users_addresses.user")
+            .onAnd("tests.age", 29)
+            .get();
+
+        expect(rows).toStrictEqual(joinedSelectedUsers);
+    });
+
+    test(`Use innerJoin with "on" method`, async () => {
+        const joinedSelectedUsers = joinedUsers.filter((u) => u.name !== "Micah");
+
+        mockClient.query
+            .mockResolvedValueOnce({
+                rows: [nameFieldMock, jobFieldMock, ageFieldMock],
+            })
+            .mockResolvedValueOnce({
+                rows: joinedSelectedUsers,
+            });
+
+        const rows = await model.table("tests")
+            .select("name", "address")
+            .innerJoin("users_addresses")
+            .on("tests.user", "users_addresses.user")
+            .onAnd("tests.job", null)
+            .get();
+
+        expect(rows).toStrictEqual(joinedSelectedUsers);
+    });
+
+    test(`Use innerJoin with "on" without the proper arguments`, () => {
+        const query = model.table("tests")
+            .select("name", "address")
+            .innerJoin("users_addresses");
+    
+        expect(() => query.on()).toThrow();
+    });
+
+    test(`Use innerJoin with "onOr" without calling "on" first`, () => {
+        const query = model.table("tests")
+            .select("name", "address")
+            .innerJoin("users_addresses");
+    
+        expect(() => query.onOr()).toThrow();
+    });
+
+    test(`Use innerJoin with "onAnd" without calling "on" first`, () => {
+        const query = model.table("tests")
+            .select("name", "address")
+            .innerJoin("users_addresses");
+    
+        expect(() => query.onAnd()).toThrow();
     });
 });
 
