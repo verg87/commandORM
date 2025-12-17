@@ -627,19 +627,23 @@ describe(`Model's innerJoin method tests`, () => {
     
         expect(() => query.on()).toThrow();
     });
+});
 
-    test(`Use innerJoin with "onOr" without calling "on" first`, () => {
+describe(`Model's leftJoin method tests`, () => {
+    test(`Use leftJoin with "onOr" without calling "on" first`, () => {
         const query = model.table("tests")
             .select("name", "address")
-            .innerJoin("users_addresses");
+            .leftJoin("users_addresses");
     
         expect(() => query.onOr()).toThrow();
     });
+});
 
-    test(`Use innerJoin with "onAnd" without calling "on" first`, () => {
+describe(`Model's rightJoin method tests`, () => {
+    test(`Use rightJoin with "onAnd" without calling "on" first`, () => {
         const query = model.table("tests")
             .select("name", "address")
-            .innerJoin("users_addresses");
+            .rightJoin("users_addresses");
     
         expect(() => query.onAnd()).toThrow();
     });

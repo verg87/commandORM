@@ -197,17 +197,20 @@ class TableQueryBuilder extends QueryBuilder {
     }
 
     /**
-     * Adds an INNER JOIN clause to the query.
-     * @param {string} table Table to perform inner join with.
+     * Contains logic that is shared between all join methods.
      * @param {any[] | function[]} args On what match or matches to perform the join.
      * Can accept function as a parameter. Note that the callback must not be an arrow function
      * @returns {TableQueryBuilder} The current instance of the TableQueryBuilder.
+     * @throws {Error} If sql join query is empty.
      */
-    innerJoin(table, ...args) {
-        this.sql.join = format(`INNER JOIN %I`, table);
-        const self = this;
+    #__join(...args) {
+        if (!this.sql.join) {
+            throw new Error("Sql join query can not be empty");
+        }
 
         if (args[0] instanceof Function && args.length === 1) {
+            const self = this;
+
             const joinConditionContext = {
                 sql: self.sql,
                 on: self.on,
@@ -219,6 +222,46 @@ class TableQueryBuilder extends QueryBuilder {
         } else if (args.length) {
             this.on(...args);
         }
+    }
+
+    /**
+     * Adds an INNER JOIN clause to the query.
+     * @param {string} table Table to perform inner join with.
+     * @param {any[] | function[]} args On what match or matches to perform the join.
+     * Can accept function as a parameter. Note that the callback must not be an arrow function
+     * @returns {TableQueryBuilder} The current instance of the TableQueryBuilder.
+     */
+    innerJoin(table, ...args) {
+        this.sql.join = format(`INNER JOIN %I`, table);
+        this.#__join(...args);
+
+        return this;
+    }
+
+    /**
+     * Adds an LEFT JOIN clause to the query.
+     * @param {string} table Table to perform left join with.
+     * @param {any[] | function[]} args On what match or matches to perform the join.
+     * Can accept function as a parameter. Note that the callback must not be an arrow function
+     * @returns {TableQueryBuilder} The current instance of the TableQueryBuilder.
+     */
+    leftJoin(table, ...args) {
+        this.sql.join = format(`LEFT JOIN %I`, table);
+        this.#__join(...args);
+
+        return this;
+    }
+
+    /**
+     * Adds an RIGHT JOIN clause to the query.
+     * @param {string} table Table to perform right join with.
+     * @param {any[] | function[]} args On what match or matches to perform the join.
+     * Can accept function as a parameter. Note that the callback must not be an arrow function
+     * @returns {TableQueryBuilder} The current instance of the TableQueryBuilder.
+     */
+    rightJoin(table, ...args) {
+        this.sql.join = format(`RIGHT JOIN %I`, table);
+        this.#__join(...args);
 
         return this;
     }
@@ -227,6 +270,7 @@ class TableQueryBuilder extends QueryBuilder {
      * Creates a condition for the JOIN clause.
      * @param {...string} args The arguments for the JOIN clause.
      * @returns {TableQueryBuilder} The current instance of the TableQueryBuilder.
+     * @throws {Error} If no arguments were given.
      */
     on(...args) {
         const operators = ["=", "!=", "<>", ">=", "<=", "<", ">"];
@@ -277,7 +321,7 @@ class TableQueryBuilder extends QueryBuilder {
         ) {
             this.sql.on = format(`ON %I.%I IS NULL`, leftTable, leftColumn);
         } else {
-            throw new Error("Invalid arguments for on method");
+            throw new Error("A join clause must have columns provided");
         }
 
         return this;
@@ -329,6 +373,7 @@ class TableQueryBuilder extends QueryBuilder {
      * Adds a WHERE clause to the query.
      * @param {...any} args The arguments for the WHERE clause.
      * @returns {TableQueryBuilder} The current instance of the TableQueryBuilder.
+     * @throws {Error} If no arguments were provided.
      */
     where(...args) {
         const operators = ["=", "!=", "<>", ">=", "<=", "<", ">"];
