@@ -662,9 +662,9 @@ class TableQueryBuilder extends QueryBuilder {
                         return format(`%1$I = EXCLUDED.%1$I`, col.column_name);
                     }
 
-                    return format(`$I = %s`, col.column_name, col.column_default);
+                    return format(`%I = %L`, col.column_name, col.column_default);
                 })
-                .join();
+                .join(", ");
 
             sql = format(
                 `%s ON CONFLICT (%I) DO UPDATE SET %s %s`,
@@ -673,7 +673,6 @@ class TableQueryBuilder extends QueryBuilder {
                 sqlSetValuesString,
                 this.sql.returning
             );
-            console.log(sql);
 
             return (await client.query(sql)).rows;
         })(values);

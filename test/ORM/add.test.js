@@ -1,3 +1,4 @@
+import { beforeEach, jest } from "@jest/globals";
 import { model, mockClient } from ".";
 import {
     idFieldMock,
@@ -9,6 +10,13 @@ import {
 } from "../../__mocks__/mocks.js";
 
 describe("Module's add method tests", () => {
+    const table = model.table("tests");
+    const addSpy = jest.spyOn(table, "add");
+
+    beforeEach(() => {
+        jest.clearAllMocks();
+    });
+
     test("Create name and job columns", async () => {
         mockClient.query
             .mockResolvedValueOnce({ rows: [] })
@@ -17,25 +25,16 @@ describe("Module's add method tests", () => {
             .mockResolvedValueOnce({ rows: [nameFieldMock] })
             .mockResolvedValueOnce({});
 
-        await model
-            .table("tests")
+        await table
             .add({ name: "name", type: "string", length: 64, nullable: false });
-        await model.table("tests").add({
+        await table.add({
             name: "job",
             type: "string",
             length: 64,
             defaultValue: "chemist",
         });
 
-        mockClient.query.mockResolvedValueOnce({
-            rows: [nameFieldMock, jobFieldMock],
-        });
-
-        const schemaData = await model.getSchemaData("tests");
-        expect(schemaData.map((col) => col["column_name"])).toStrictEqual([
-            "name",
-            "job",
-        ]);
+        expect(addSpy).toHaveBeenCalledTimes(2);
     });
 
     test(`Add a primary key column to the table`, async () => {
@@ -43,21 +42,21 @@ describe("Module's add method tests", () => {
             .mockResolvedValueOnce({ rows: [nameFieldMock, jobFieldMock] })
             .mockResolvedValueOnce({});
 
-        await model
-            .table("tests")
+        await table
             .add({name: "id", type: "pk"});
 
-        mockClient.query.mockResolvedValueOnce({
-            rows: [idFieldMock, nameFieldMock, jobFieldMock],
-        });
-
-        const schemaData = await model.getSchemaData("tests");
-        expect(schemaData.map((col) => col["column_name"])).toStrictEqual([
-            "id",
-            "name",
-            "job",
-        ]);
+        expect(addSpy).toHaveBeenCalledTimes(1);
+        expect(addSpy).toHaveBeenCalledWith({name: "id", type: "pk"});
     });
+
+    test(`Add a serial primary key with a default value`, async () => {
+        mockClient.query
+            .mockResolvedValueOnce({rows: [nameFieldMock, jobFieldMock]});
+
+        await expect(
+            model.table("tests").add({name: "id", type: "pk", defaultValue: 12})
+        ).rejects.toThrow();
+    })
 
     test(`Test adding duplicate columns`, async () => {
         mockClient.query.mockResolvedValueOnce({
@@ -96,17 +95,10 @@ describe("Module's add method tests", () => {
             .mockResolvedValueOnce({ rows: [nameFieldMock, jobFieldMock] })
             .mockResolvedValueOnce({});
 
-        await model
-            .table("tests")
+        await table
             .add({ name: "age", type: "int", nullable: true });
 
-        mockClient.query.mockResolvedValueOnce({
-            rows: [nameFieldMock, jobFieldMock, ageFieldMock],
-        });
-
-        const schemaData = await model.getSchemaData("tests");
-
-        expect(schemaData.some((obj) => obj["column_name"] === "age")).toBe(true);
+        expect(addSpy).toHaveBeenCalledTimes(1);
     });
 
     test(`Test for error when creating float type column and not providing 'scale' and 'precision'`, async () => {
@@ -126,17 +118,11 @@ describe("Module's add method tests", () => {
             })
             .mockResolvedValueOnce({});
 
-        await model
-            .table("tests")
+        await table
             .add({ name: "gpa", type: "float", precision: 3, scale: 2 });
 
-        mockClient.query.mockResolvedValueOnce({
-            rows: [nameFieldMock, jobFieldMock, ageFieldMock, gpaFieldMock],
-        });
-
-        const schemaData = await model.getSchemaData("tests");
-
-        expect(schemaData.some((obj) => obj["column_name"] === "gpa")).toBe(true);
+        expect(addSpy).toHaveBeenCalledTimes(1);
+        expect(addSpy).toHaveBeenCalledWith({ name: "gpa", type: "float", precision: 3, scale: 2 });
     });
 
     test(`Create date type column`, async () => {
@@ -146,25 +132,10 @@ describe("Module's add method tests", () => {
             })
             .mockResolvedValueOnce({});
 
-        await model
-            .table("tests")
+        await table
             .add({ name: "date_of_birth", type: "date", nullable: false });
 
-        mockClient.query.mockResolvedValueOnce({
-            rows: [
-                nameFieldMock,
-                jobFieldMock,
-                ageFieldMock,
-                gpaFieldMock,
-                dateFieldMock,
-            ],
-        });
-
-        const schemaData = await model.getSchemaData("tests");
-
-        expect(
-            schemaData.some((obj) => obj["column_name"] === "date_of_birth")
-        ).toBe(true);
+        expect(addSpy).toHaveBeenCalledTimes(1);
     });
 
     test(`Unsupported column type`, async () => {

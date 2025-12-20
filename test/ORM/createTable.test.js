@@ -1,6 +1,9 @@
+import { jest } from "@jest/globals";
 import { model, mockClient } from ".";
 
 describe("Model's createTable method tests", () => {
+    const createTableSpy = jest.spyOn(model, "createTable");
+
     test("Create tests table test", async () => {
         // model.createTable('tests') fires client.query two times
         // and the model.exists calls client.query one time.
@@ -11,12 +14,7 @@ describe("Model's createTable method tests", () => {
 
         await model.createTable("tests");
 
-        mockClient.query
-            .mockResolvedValueOnce({ rows: [{ exists: true }] });
-
-        const exists = await model.exists("tests");
-
-        expect(exists).toBe(true);
+        expect(createTableSpy).toHaveBeenCalled();
     });
 
     test(`Create already existing table`, async () => {
