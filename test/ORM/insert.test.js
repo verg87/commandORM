@@ -10,11 +10,17 @@ describe("Model's insert method tests", () => {
     test("Insert into tests table values", async () => {
         mockClient.query
             .mockResolvedValueOnce({
+                rows: [], // returning primary keys for that table
+            })
+            .mockResolvedValueOnce({
                 rows: [nameFieldMock, jobFieldMock, ageFieldMock],
             })
             .mockResolvedValueOnce({});
 
         mockClient.query
+            .mockResolvedValueOnce({
+                rows: [],
+            })
             .mockResolvedValueOnce({
                 rows: [nameFieldMock, jobFieldMock, ageFieldMock],
             })
@@ -26,12 +32,18 @@ describe("Model's insert method tests", () => {
         // mocking queries for model.table("tests").returning("name").insert({ name: "Gustavo" }); call
         mockClient.query
             .mockResolvedValueOnce({
+                rows: [],
+            })
+            .mockResolvedValueOnce({
                 rows: [nameFieldMock, jobFieldMock, ageFieldMock],
             })
             .mockResolvedValueOnce({ rows: [{ name: "Gustavo" }] });
 
         // mocking queries for model.table("tests").select().get() call
         mockClient.query
+            .mockResolvedValueOnce({
+                rows: [],
+            })
             .mockResolvedValueOnce({
                 rows: [nameFieldMock, jobFieldMock, ageFieldMock],
             })
@@ -53,6 +65,9 @@ describe("Model's insert method tests", () => {
     test(`Insert into invalid table name, column`, async () => {
         mockClient.query
             .mockResolvedValueOnce({
+                rows: [],
+            })
+            .mockResolvedValueOnce({
                 rows: [nameFieldMock, jobFieldMock, ageFieldMock],
             });
 
@@ -61,6 +76,9 @@ describe("Model's insert method tests", () => {
         }).rejects.toThrow();
 
         mockClient.query
+            .mockResolvedValueOnce({
+                rows: [],
+            })
             .mockResolvedValueOnce({
                 rows: [nameFieldMock, jobFieldMock, ageFieldMock],
             });
@@ -73,6 +91,9 @@ describe("Model's insert method tests", () => {
     test(`Test for missing mandatory column in object argument`, async () => {
         mockClient.query
             .mockResolvedValueOnce({
+                rows: [],
+            })
+            .mockResolvedValueOnce({
                 rows: [nameFieldMock, jobFieldMock, ageFieldMock],
             })
 
@@ -84,6 +105,9 @@ describe("Model's insert method tests", () => {
 
     test(`Test for not existing columns provided by user`, async () => {
         mockClient.query
+            .mockResolvedValueOnce({
+                rows: [],
+            })
             .mockResolvedValueOnce({
                 rows: [nameFieldMock, jobFieldMock, ageFieldMock],
             })

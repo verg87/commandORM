@@ -1,3 +1,10 @@
+const idFieldMock = {
+    column_name: "id",
+    column_default: "nextval('test_id_seq'::regclass)",
+    is_nullable: "NO",
+    data_type: "integer",
+};
+
 const nameFieldMock = {
     column_name: "name",
     column_default: null,
@@ -46,6 +53,7 @@ const joinedUsers = [
 ];
 
 export {
+    idFieldMock,
     nameFieldMock,
     ageFieldMock,
     jobFieldMock,

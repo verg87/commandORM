@@ -308,12 +308,7 @@ class TableQueryBuilder extends QueryBuilder {
             typeof args[1] === "number" &&
             args.length === 2
         ) {
-            this.sql.on = format(
-                `ON %I.%I = %s`,
-                leftTable,
-                leftColumn,
-                args[1]
-            );
+            this.sql.on = format(`ON %I.%I = %s`, leftTable, leftColumn, args[1]);
         } else if (
             typeof args[0] === "string" &&
             args[1] === null &&
@@ -547,50 +542,73 @@ class TableQueryBuilder extends QueryBuilder {
     }
 
     /**
-     * Inserts one or more rows into the table.
+     * Contains similar logic that is shared between public insert and upsert methods.
      * @param {object|Array<object>} values An object or an array of objects representing the rows to insert.
-     * @returns {Promise<Array<object>>} A promise that resolves to an array of the inserted rows.
+     * @returns {Promise<Array<any>>} A promise that resolves to an array representing the sql query and schema data.
      * @throws {Error} If any of the provided columns do not exist in the table.
      * @throws {Error} If any of the mandatory columns are missing.
      */
+    async #__insert(values) {
+        const rows = Array.isArray(values) ? values : [values];
+
+        const primaryKeys = await this.model.getPrimaryKeys(this.tableName);
+        let schemaData = await this.model.getSchemaData(this.tableName);
+
+        // If values doesn't have primary keys
+        if (primaryKeys.some((col) => !values[col.column_name])) {
+            // We remove data about primary keys in schemaData
+            const primaryKeyColumns = primaryKeys.map((col) => col.column_name);
+            schemaData = schemaData.filter(
+                (col) => !primaryKeyColumns.includes(col.column_name)
+            );
+        }
+
+        const columns = schemaData.map((col) => col.column_name);
+
+        const mandatoryColumns = schemaData
+            .filter((col) => col.is_nullable === "NO" && !col.column_default)
+            .map((col) => col.column_name);
+
+        const sortedValues = rows.map((values) => {
+            const valueKeys = Object.keys(values);
+            validateSQLName(...valueKeys);
+
+            if (!valueKeys.every((col) => columns.includes(col)))
+                throw new Error(
+                    `Some of the provided columns don't exist in table "${this.tableName}"`
+                );
+
+            if (
+                !mandatoryColumns.every((col) => valueKeys.includes(col) && values[col])
+            )
+                throw new Error(`Missing mandatory columns: ${mandatoryColumns}`);
+
+            return schemaData.map(
+                (col) => values[col.column_name] || col.column_default
+            );
+        });
+
+        const sqlValuesString = sortedValues.map((row) => format(`(%L)`, row));
+
+        const sql = format(
+            `INSERT INTO %I VALUES %s`,
+            this.tableName,
+            sqlValuesString
+        );
+
+        return [sql, schemaData, primaryKeys];
+    }
+
+    /**
+     * Inserts one or more rows into the table.
+     * @param {object|Array<object>} values An object or an array of objects representing the rows to insert.
+     * @returns {Promise<Array<object>>} A promise that resolves to an array of the inserted rows.
+     */
     async insert(values) {
         return await this.model.decorator(async (values, client) => {
-            const rows = Array.isArray(values) ? values : [values];
+            let [sql, _, __] = await this.#__insert(values);
 
-            const schemaData = await this.model.getSchemaData(this.tableName);
-            const columns = schemaData.map((col) => col.column_name);
-
-            const mandatoryColumns = schemaData
-                .filter((col) => col.is_nullable === "NO" && !col.column_default)
-                .map((col) => col.column_name);
-
-            const sortedValues = rows.map((values) => {
-                const valueKeys = Object.keys(values);
-                validateSQLName(...valueKeys);
-
-                if (!valueKeys.every((col) => columns.includes(col)))
-                    throw new Error(
-                        `Some of the provided columns don't exist in table "${this.tableName}"`
-                    );
-
-                if (
-                    !mandatoryColumns.every(
-                        (col) => valueKeys.includes(col) && values[col]
-                    )
-                )
-                    throw new Error(`Missing mandatory columns: ${mandatoryColumns}`);
-
-                return columns.map((col) => values[col] || null);
-            });
-
-            const sqlValuesString = sortedValues.map((row) => format(`(%L)`, row));
-
-            const sql = format(
-                `INSERT INTO %I VALUES %s %s;`,
-                this.tableName,
-                sqlValuesString,
-                this.sql.returning
-            );
+            sql = format(`%s %s`, sql, this.sql.returning);
 
             return (await client.query(sql)).rows;
         })(values);
@@ -621,10 +639,51 @@ class TableQueryBuilder extends QueryBuilder {
     }
 
     /**
+     * Inserts or updates multiple rows in a table.
+     * @param {object|Array<object>} values An object or an array of objects representing the rows to upsert.
+     * @returns {Promise<Array<object>>} A promise that resolves to an array of the upserted rows.
+     */
+    async upsert(values) {
+        let [sql, schemaData, primaryKeys] = await this.#__insert(values);
+
+        if (!primaryKeys.length) {
+            return [];
+        }
+
+        return await this.model.decorator(async (values, client) => {
+            const primaryKeyColumns = primaryKeys.map((col) => col.column_name);
+            const columnsToUpdate = schemaData.filter(
+                (col) => !primaryKeyColumns.includes(col.column_name)
+            );
+
+            const sqlSetValuesString = columnsToUpdate
+                .map((col) => {
+                    if (values[col.column_name]) {
+                        return format(`%1$I = EXCLUDED.%1$I`, col.column_name);
+                    }
+
+                    return format(`$I = %s`, col.column_name, col.column_default);
+                })
+                .join();
+
+            sql = format(
+                `%s ON CONFLICT (%I) DO UPDATE SET %s %s`,
+                sql,
+                primaryKeys[0].column_name,
+                sqlSetValuesString,
+                this.sql.returning
+            );
+            console.log(sql);
+
+            return (await client.query(sql)).rows;
+        })(values);
+    }
+
+    /**
      * Creates a new column in a specified table.
      * @param {object} columnData - An object containing the configuration for the new column.
      * @param {string} columnData.name - The name of the new column. Must be a valid SQL identifier.
-     * @param {string} columnData.type - The data type of the column. Supported types: 'string', 'int', 'float', 'date', 'timestamp', 'time'.
+     * @param {string} columnData.type - The data type of the column. Supported types: 'string', 'int', 'float', 'date', 'timestamp', 'time', 'pk'.
      * @param {number} [columnData.length] - The maximum length for 'string' type columns. Required if type is 'string'.
      * @param {number} [columnData.precision] - The total number of digits for 'float' type columns. Required if type is 'float'.
      * @param {number} [columnData.scale] - The number of digits to the right of the decimal point for 'float' type columns. Required if type is 'float'.
@@ -633,6 +692,7 @@ class TableQueryBuilder extends QueryBuilder {
      * @throws {Error} If the column name is a duplicate or invalid.
      * @throws {Error} If required parameters for a data type are missing (e.g., length for string).
      * @throws {Error} If an unsupported data type is specified.
+     * @throws {Error} If a default value is specified for a serial primary key.
      */
     async add(columnData) {
         await this.model.decorator(async (client) => {
@@ -647,6 +707,8 @@ class TableQueryBuilder extends QueryBuilder {
 
             if (columnNames.includes(name)) {
                 throw new Error(`Duplicate column name: ${name}`);
+            } else if (type === "pk" && defaultValue) {
+                throw new Error(`Can't add a serial primary key with a default value`);
             }
 
             const sqlType = (() => {
@@ -661,6 +723,9 @@ class TableQueryBuilder extends QueryBuilder {
                             throw new Error("float type requires max and min");
 
                         return `DECIMAL(${precision}, ${scale})`;
+                    }
+                    case "pk": {
+                        return "SERIAL PRIMARY KEY";
                     }
                     case "int":
                     case "timestamp":

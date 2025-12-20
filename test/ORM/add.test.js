@@ -1,5 +1,6 @@
 import { model, mockClient } from ".";
 import {
+    idFieldMock,
     nameFieldMock,
     jobFieldMock,
     ageFieldMock,
@@ -32,6 +33,27 @@ describe("Module's add method tests", () => {
 
         const schemaData = await model.getSchemaData("tests");
         expect(schemaData.map((col) => col["column_name"])).toStrictEqual([
+            "name",
+            "job",
+        ]);
+    });
+
+    test(`Add a primary key column to the table`, async () => {
+        mockClient.query
+            .mockResolvedValueOnce({ rows: [nameFieldMock, jobFieldMock] })
+            .mockResolvedValueOnce({});
+
+        await model
+            .table("tests")
+            .add({name: "id", type: "pk"});
+
+        mockClient.query.mockResolvedValueOnce({
+            rows: [idFieldMock, nameFieldMock, jobFieldMock],
+        });
+
+        const schemaData = await model.getSchemaData("tests");
+        expect(schemaData.map((col) => col["column_name"])).toStrictEqual([
+            "id",
             "name",
             "job",
         ]);
