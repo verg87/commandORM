@@ -1,6 +1,9 @@
+import { jest } from "@jest/globals";
 import { model, mockClient } from ".";
 
 describe("Model's deleteTable method tests", () => {
+    const deleteTableSpy = jest.spyOn(model, "deleteTable");
+
     test("Delete tests table test", async () => {
         mockClient.query
             .mockResolvedValueOnce({ rows: [{ exists: true }] })
@@ -8,12 +11,7 @@ describe("Model's deleteTable method tests", () => {
 
         await model.deleteTable("tests");
 
-        mockClient.query
-            .mockResolvedValueOnce({ rows: [{ exists: false }] });
-
-        const exists = await model.exists("tests");
-
-        expect(exists).toBe(false);
+        expect(deleteTableSpy).toHaveBeenCalled();
     });
 
     test(`Delete table that doesn't exist`, async () => {

@@ -1,3 +1,4 @@
+import { jest } from "@jest/globals";
 import { model, mockClient } from ".";
 import {
     nameFieldMock,
@@ -8,9 +9,13 @@ import {
 
 beforeEach(() => {
     mockClient.query.mockReset();
+    jest.clearAllMocks();
 });
 
 describe("Model's get tests", () => {
+    const table = model.table("tests");
+    const getSpy = jest.spyOn(table, "get");
+
     test("get all rows from table", async () => {
         mockClient.query
             .mockResolvedValueOnce({ rows: [nameFieldMock, jobFieldMock, ageFieldMock] })
@@ -18,8 +23,10 @@ describe("Model's get tests", () => {
                 rows: users
             });
 
-        const res = await model.table("tests").select().get();
+        const res = await table.select().get();
+
         expect(res[0].name).toBe("Micah");
+        expect(getSpy).toHaveBeenCalledTimes(1);
     });
 
     test(`call get without select and with unknown columns`, async () => {
@@ -49,7 +56,7 @@ describe("Model's get tests", () => {
                 rows: users,
             });
 
-        const descTableContents = await model.table("tests").select().get();
+        const descTableContents = await table.select().get();
 
         mockClient.query
             .mockResolvedValueOnce({
@@ -59,13 +66,13 @@ describe("Model's get tests", () => {
                 rows: users.reverse(),
             });
 
-        const reversedTableContents = await model
-            .table("tests")
+        const reversedTableContents = await table
             .select()
             .desc()
             .get();
 
         expect(descTableContents.reverse()).toStrictEqual(reversedTableContents);
+        expect(getSpy).toHaveBeenCalledTimes(2);
     });
 
     test(`use limit with get`, async () => {
@@ -77,23 +84,23 @@ describe("Model's get tests", () => {
                 rows: users,
             });
 
-        const tableContents = await model.table("tests").select().get();
+        const tableContents = await table.select().get();
 
         mockClient.query
             .mockResolvedValueOnce({
                 rows: [nameFieldMock, jobFieldMock, ageFieldMock],
             })
             .mockResolvedValueOnce({
-                rows: users.slice(0, 2),
+                rows: users.slice(0, 2).reverse(),
             });
 
-        const tableContentsWithLimit = await model
-            .table("tests")
+        const tableContentsWithLimit = await table
             .select()
             .limit(2)
             .get();
 
         expect(tableContents.slice(0, 2)).toStrictEqual(tableContentsWithLimit);
+        expect(getSpy).toHaveBeenCalledTimes(2);
     });
 
     test(`use orderBy with get`, async () => {
@@ -102,16 +109,16 @@ describe("Model's get tests", () => {
                 rows: [nameFieldMock, jobFieldMock, ageFieldMock],
             })
             .mockResolvedValueOnce({
-                rows: users.sort((a, b) => a.age !== null && b.age !== null ? a.age - b.age : -1),
+                rows: users.sort((a, b) => a.age !== null && b.age !== null ? b.age - a.age : -1),
             });
 
-        const tableContentsOrderedByAge = await model
-            .table("tests")
+        const tableContentsOrderedByAge = await table
             .select()
             .orderBy("age")
             .get();
 
         expect(tableContentsOrderedByAge[0].age).toStrictEqual(29);
+        expect(getSpy).toHaveBeenCalledTimes(1);
     });
 
     test("get specific rows from table", async () => {
@@ -123,8 +130,7 @@ describe("Model's get tests", () => {
                 rows: users.filter((u) => u.job === "chemist" || u.job === "rat"),
             });
 
-        const query = await model
-            .table("tests")
+        const query = await table
             .select()
             .where("job", ["chemist", "rat"])
             .get();
@@ -137,8 +143,7 @@ describe("Model's get tests", () => {
                 rows: users.filter((u) => u.job === null && u.age === null),
             });
 
-        const queryWithIsNull = await model
-            .table("tests")
+        const queryWithIsNull = await table
             .select()
             .where("job", null)
             .and("age", null)
@@ -148,6 +153,7 @@ describe("Model's get tests", () => {
         expect(queryWithIsNull.map((row) => [row.job, row.age])).toStrictEqual([
             [null, null],
         ]);
+        expect(getSpy).toHaveBeenCalledTimes(2);
     });
 
     test(`Use 'and' and 'or' methods without calling where first`, () => {

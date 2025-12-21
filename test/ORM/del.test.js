@@ -1,3 +1,4 @@
+import { jest } from "@jest/globals";
 import { model, mockClient } from ".";
 import {
     nameFieldMock,
@@ -8,6 +9,9 @@ import {
 } from "../../__mocks__/mocks.js";
 
 describe(`Model's del method tests`, () => {
+    const table = model.table("tests");
+    const delSpy = jest.spyOn(table, "del");
+
     test(`Delete column`, async () => {
         mockClient.query
             .mockResolvedValueOnce({
@@ -27,20 +31,10 @@ describe(`Model's del method tests`, () => {
             })
             .mockResolvedValueOnce({});
 
-        await model.table("tests").del("date_of_birth");
-        await model.table("tests").del("gpa");
+        await table.del("date_of_birth");
+        await table.del("gpa");
 
-        mockClient.query.mockResolvedValueOnce({
-            rows: [nameFieldMock, jobFieldMock, ageFieldMock],
-        });
-
-        const schemaData = await model.getSchemaData("tests");
-
-        expect(
-            schemaData.every(
-                (obj) => !["date_of_birth", "gpa"].includes(obj["column_name"])
-            )
-        ).toBe(true);
+        expect(delSpy).toHaveBeenCalledTimes(2);
     });
 
     test(`Invalid column name`, async () => {

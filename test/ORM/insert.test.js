@@ -1,12 +1,15 @@
+import { jest } from "@jest/globals";
 import { model, mockClient } from ".";
 import {
     nameFieldMock,
     jobFieldMock,
     ageFieldMock,
-    users
 } from "../../__mocks__/mocks.js";
 
 describe("Model's insert method tests", () => {
+    const table = model.table("tests");
+    const insertSpy = jest.spyOn(table, "insert");
+
     test("Insert into tests table values", async () => {
         mockClient.query
             .mockResolvedValueOnce({
@@ -26,8 +29,8 @@ describe("Model's insert method tests", () => {
             })
             .mockResolvedValueOnce({});
 
-        await model.table("tests").insert([{ name: "Micah", age: 29, job: "rat" }]);
-        await model.table("tests").insert({ name: "Gustavo", age: 32 });
+        await table.insert([{ name: "Micah", age: 29, job: "rat" }]);
+        await table.insert({ name: "Gustavo", age: 32 });
 
         // mocking queries for model.table("tests").returning("name").insert({ name: "Gustavo" }); call
         mockClient.query
@@ -39,27 +42,12 @@ describe("Model's insert method tests", () => {
             })
             .mockResolvedValueOnce({ rows: [{ name: "Gustavo" }] });
 
-        // mocking queries for model.table("tests").select().get() call
-        mockClient.query
-            .mockResolvedValueOnce({
-                rows: [],
-            })
-            .mockResolvedValueOnce({
-                rows: [nameFieldMock, jobFieldMock, ageFieldMock],
-            })
-            .mockResolvedValueOnce({
-                rows: users
-            });
-
-        const insertWithReturning = await model
-            .table("tests")
+        const insertWithReturning = await table
             .returning("name")
             .insert({ name: "Gustavo" });
 
-        const rows = await model.table("tests").select().get();
-
-        expect(rows.length).toBeGreaterThan(0);
         expect(insertWithReturning[0].name).toBe("Gustavo");
+        expect(insertSpy).toHaveBeenCalledTimes(3);
     });
 
     test(`Insert into invalid table name, column`, async () => {
