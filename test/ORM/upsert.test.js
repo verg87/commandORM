@@ -70,6 +70,9 @@ describe(`Model's upsert method tests`, () => {
             })
             .mockResolvedValueOnce({
                 rows: [idFieldMock, nameFieldMock, jobFieldMock, ageFieldMock],
+            })
+            .mockResolvedValueOnce({
+                rows: []
             });
 
         await table

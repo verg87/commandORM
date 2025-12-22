@@ -647,7 +647,12 @@ class TableQueryBuilder extends QueryBuilder {
         let [sql, schemaData, primaryKeys] = await this.#__insert(values);
 
         if (!primaryKeys.length) {
-            return [];
+            // Do an insert
+            return await this.model.decorator(async (client) => {
+                sql = format(`%s %s`, sql, this.sql.returning);
+
+                return (await client.query(sql)).rows;
+            })();
         }
 
         return await this.model.decorator(async (values, client) => {
