@@ -75,7 +75,7 @@ describe("Module's add method tests", () => {
         await expect(
             model
                 .table("tests")
-                .add({ name: "age and salary", type: "int", defaultValue: 30 })
+                .add({ name: "1column with number", type: "int", defaultValue: 30 })
         ).rejects.toThrow();
     });
 

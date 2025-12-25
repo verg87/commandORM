@@ -1,16 +1,7 @@
 import { Pool } from "pg";
 import format from "pg-format";
 import { QueryBuilder } from "./queryBuilder.js";
-
-const validateSQLName = (...args) => {
-    if (!args.every((arg) => typeof arg === "string"))
-        throw new Error(`Column/Table names must be a string`);
-
-    if (!args.every((arg) => /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(arg)))
-        throw new Error(
-            `Column/Table names can consist of only upper or lower cased letters, underscores and numbers`
-        );
-};
+import { validateSQLName } from "./validation.js";
 
 class Model {
     /**
@@ -756,6 +747,20 @@ class TableQueryBuilder extends QueryBuilder {
 
             await client.query(sql);
         })();
+    }
+
+    // modify method is coming soon
+
+    /**
+     * Renames a column.
+     * @param {string} oldName The previous name of the column.
+     * @param {string} newName The new name of the column.
+     */
+    async rename(oldName, newName) {
+        await this.model.decorator(async (oldName, newName, client) => {
+            validateSQLName(oldName, newName);
+            // soon...
+        })(oldName, newName);
     }
 
     /**
