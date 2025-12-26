@@ -675,6 +675,66 @@ class TableQueryBuilder extends QueryBuilder {
     }
 
     /**
+     * Contains logic that is used in both modify and add methods.
+     * @param {object} columnData - The object containing column data.
+     * @param {string} errorMsg - Error message that shows up when table already has provided column name.
+     * @returns {Promise<object>}
+     */
+    async #__alter(columnData, errorMsg) {
+        const schemaData = await this.model.getSchemaData(this.tableName);
+        let { name, type, length, precision, scale, defaultValue, nullable } =
+                columnData;
+
+        const initialColumn = schemaData.filter((col) => col["column_name"] === name);
+        const initialDataType = initialColumn ? initialColumn["data_type"] : null;
+
+        type = type.toLowerCase();
+
+        validateSQLName(name);
+
+        if (!initialColumn) {
+            throw new Error(errorMsg);
+        } 
+
+        const sqlType = (() => {
+            switch (type) {
+                case "string": {
+                    if (!length) throw new Error("String type requires max length");
+
+                    return `VARCHAR(${length})`;
+                }
+                case "float": {
+                    if (!precision || !scale)
+                        throw new Error("Float type requires max and min");
+
+                    return `DECIMAL(${precision}, ${scale})`;
+                }
+                case "pk": {
+                    return "SERIAL PRIMARY KEY";
+                }
+                case "int":
+                case "timestamp":
+                case "time":
+                case "date":
+                    return type.toUpperCase();
+                default:
+                    throw new Error(`Unsupported data type: ${type["name"]}`);
+            }
+        })();
+
+        const defaultClause =
+            defaultValue !== undefined ? format(`DEFAULT %L`, defaultValue) : "";
+        const nullClause = nullable === false ? "NOT NULL" : "";
+
+        const sql = format(
+            `ALTER TABLE %I`,
+            this.tableName,
+        );
+
+        return { sql, name, sqlType, defaultClause, nullClause, initialDataType };
+    }
+
+    /**
      * Creates a new column in a specified table.
      * @param {object} columnData - An object containing the configuration for the new column.
      * @param {string} columnData.name - The name of the new column. Must be a valid SQL identifier.
@@ -684,61 +744,23 @@ class TableQueryBuilder extends QueryBuilder {
      * @param {number} [columnData.scale] - The number of digits to the right of the decimal point for 'float' type columns. Required if type is 'float'.
      * @param {*} [columnData.defaultValue] - The default value for the column. If a string or date, it will be wrapped in single quotes.
      * @param {boolean} [columnData.nullable=true] - Whether the column can accept NULL values. Set to `false` for NOT NULL.
-     * @throws {Error} If the column name is a duplicate or invalid.
-     * @throws {Error} If required parameters for a data type are missing (e.g., length for string).
-     * @throws {Error} If an unsupported data type is specified.
      * @throws {Error} If a default value is specified for a serial primary key.
      */
     async add(columnData) {
-        await this.model.decorator(async (client) => {
-            const schemaData = await this.model.getSchemaData(this.tableName);
-            let { name, type, length, precision, scale, defaultValue, nullable } =
-                columnData;
-            const columnNames = schemaData.map((col) => col["column_name"]);
+        await this.model.decorator(async (columnData, client) => {
+            const errorMsg = "Duplicate column name.";
+            const { type, defaultValue } = columnData;
 
-            type = type.toLowerCase();
+            let { sql, name, sqlType, defaultClause, nullClause } 
+                = this.#__alter(columnData, errorMsg);
 
-            validateSQLName(name);
-
-            if (columnNames.includes(name)) {
-                throw new Error(`Duplicate column name: ${name}`);
-            } else if (type === "pk" && defaultValue) {
+            if (type === "pk" && defaultValue) {
                 throw new Error(`Can't add a serial primary key with a default value`);
             }
 
-            const sqlType = (() => {
-                switch (type) {
-                    case "string": {
-                        if (!length) throw new Error("string type requires max length");
-
-                        return `VARCHAR(${length})`;
-                    }
-                    case "float": {
-                        if (!precision || !scale)
-                            throw new Error("float type requires max and min");
-
-                        return `DECIMAL(${precision}, ${scale})`;
-                    }
-                    case "pk": {
-                        return "SERIAL PRIMARY KEY";
-                    }
-                    case "int":
-                    case "timestamp":
-                    case "time":
-                    case "date":
-                        return type.toUpperCase();
-                    default:
-                        throw new Error(`Unsupported data type: ${type["name"]}`);
-                }
-            })();
-
-            const defaultClause =
-                defaultValue !== undefined ? format(`DEFAULT %L`, defaultValue) : "";
-            const nullClause = nullable === false ? "NOT NULL" : "";
-
-            const sql = format(
-                `ALTER TABLE %I ADD COLUMN %I %s %s %s;`,
-                this.tableName,
+            sql = format(
+                `%s ADD COLUMN %I %s %s %s;`,
+                sql,
                 name,
                 sqlType,
                 nullClause,
@@ -746,10 +768,59 @@ class TableQueryBuilder extends QueryBuilder {
             );
 
             await client.query(sql);
-        })();
+        })(columnData);
     }
 
-    // modify method is coming soon
+    /**
+     * Modifies an existing column, their type, default value and etc.
+     * @param {object} columnData - An object containing the configuration for the new column.
+     * @param {string} columnData.name - The name of the new column. Must be a valid SQL identifier.
+     * @param {string} columnData.type - The data type of the column. Supported types: 'string', 'int', 'float', 'date', 'timestamp', 'time'
+     * @param {number} [columnData.length] - The maximum length for 'string' type columns. Required if type is 'string'.
+     * @param {number} [columnData.precision] - The total number of digits for 'float' type columns. Required if type is 'float'.
+     * @param {number} [columnData.scale] - The number of digits to the right of the decimal point for 'float' type columns. Required if type is 'float'.
+     * @param {*} [columnData.defaultValue] - The default value for the column. If a string or date, it will be wrapped in single quotes.
+     * @param {boolean} [columnData.nullable=true] - Whether the column can accept NULL values. Set to `false` for NOT NULL.
+     * @throws {Error} If an unsupported data type is specified.
+     * @throws {Error} If initial column type is not convertable to the provided one.
+     */
+    async modify(columnData) {
+        await this.model.decorator(async (columnData, client) => {
+            const errorMsg = "There is no such column.";
+            const { type } = columnData;
+
+            let { sql, name, sqlType, defaultClause, nullClause, initialDataType } 
+                = this.#__alter(columnData, errorMsg);
+
+            if (type === "pk") {
+                throw new Error(`Unsupported data type: ${type}`);
+            }
+
+            switch (type) {
+                case "float":;
+                case "int": {
+                    if (!["int", "float"].includes(initialDataType)) {
+                        throw new Error("Can not convert non-numeric data types into numeric.");
+                    }
+
+                    break;
+                }
+                case "date":;
+                case "time":;
+                case "timestamp": {
+                    if (!["date", "time", "timestamp"].includes(initialDataType)) {
+                        throw new Error("Can not convert non-date types into date like types.");
+                    }
+
+                    break;
+                }
+                case "string": break;
+                default: break;
+            }
+
+            // await client.query(sql);
+        })(columnData);
+    }
 
     /**
      * Renames a column.
@@ -759,7 +830,23 @@ class TableQueryBuilder extends QueryBuilder {
     async rename(oldName, newName) {
         await this.model.decorator(async (oldName, newName, client) => {
             validateSQLName(oldName, newName);
-            // soon...
+
+            const schemaData = await this.model.getSchemaData(this.tableName);
+            const columns = schemaData.map((col) => col.column_name);
+
+            if (!columns.includes(oldName))
+                throw new Error(
+                    `There's no such column as "${oldName}" in the table "${this.tableName}"`
+                );
+            
+            const sql = format(
+                `ALTER TABLE %I RENAME COLUMN %I TO %I`, 
+                this.tableName, 
+                oldName, 
+                newName
+            );
+
+            await client.query(sql);
         })(oldName, newName);
     }
 
@@ -793,7 +880,7 @@ class TableQueryBuilder extends QueryBuilder {
      * Counts the number of rows in a given table
      * @param {string} [column] The name of the column to count.
      * If omitted "*" is used.
-     * @returns the number of rows in the table
+     * @returns Promise<int> the number of rows in the table
      */
     async count(column) {
         return await this.model.decorator(async (column, client) => {
