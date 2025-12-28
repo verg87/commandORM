@@ -1,6 +1,6 @@
 const idFieldMock = {
     column_name: "id",
-    column_default: "nextval('test_id_seq'::regclass)",
+    column_default: "nextval('tests_id_seq'::regclass)",
     is_nullable: "NO",
     data_type: "integer",
 };

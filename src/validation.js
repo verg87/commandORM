@@ -104,7 +104,7 @@ const validateSQLName = (...args) => {
     if (!args.every((arg) => typeof arg === "string"))
         throw new Error(`Column/Table names must be a string`);
 
-    if (args.some((arg) => /^[0-9]/.test(arg) || reservedKeyWords.includes(arg.toLocaleLowerCase())))
+    if (args.some((arg) => /^[0-9]/.test(arg) || reservedKeyWords.includes(arg.toLocaleLowerCase()))) 
         throw new Error(
             `Column/Table names can not begin with numbers and can not be a reserved keyword.`
         );

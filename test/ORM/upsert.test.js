@@ -25,8 +25,7 @@ describe(`Model's upsert method tests`, () => {
             })
             .mockResolvedValueOnce({});
 
-        await table
-            .upsert({ id: 2, name: "Pete", age: 20, job: "waiter" });
+        await table.upsert({ id: 2, name: "Pete", age: 20, job: "waiter" });
 
         expect(upsertSpy).toHaveBeenCalled();
     });
@@ -41,8 +40,7 @@ describe(`Model's upsert method tests`, () => {
             })
             .mockResolvedValueOnce({});
 
-        await table
-            .upsert({ id: 3, name: "Pete", job: "waiter" });
+        await table.upsert({ id: 3, name: "Pete", job: "waiter" });
 
         expect(upsertSpy).toHaveBeenCalled();
     });
@@ -57,8 +55,7 @@ describe(`Model's upsert method tests`, () => {
             })
             .mockResolvedValueOnce({});
 
-        await table
-            .upsert({ name: "Pete", age: 20, job: "waiter" });
+        await table.upsert({ name: "Pete", age: 20, job: "waiter" });
 
         expect(upsertSpy).toHaveBeenCalled();
     });
@@ -72,11 +69,10 @@ describe(`Model's upsert method tests`, () => {
                 rows: [idFieldMock, nameFieldMock, jobFieldMock, ageFieldMock],
             })
             .mockResolvedValueOnce({
-                rows: []
+                rows: [],
             });
 
-        await table
-            .upsert({ name: "Pete", age: 20, job: "waiter" });
+        await table.upsert({ name: "Pete", age: 20, job: "waiter" });
 
         expect(upsertSpy).toHaveBeenCalled();
     });
@@ -91,8 +87,9 @@ describe(`Model's upsert method tests`, () => {
             })
             .mockResolvedValueOnce({});
 
-        await expect(table.upsert({ id: 3, age: 23, job: "waiter" }))
-            .rejects.toThrow();
+        await expect(
+            table.upsert({ id: 3, age: 23, job: "waiter" })
+        ).rejects.toThrow();
 
         expect(upsertSpy).toHaveBeenCalledTimes(1);
     });
