@@ -1,5 +1,5 @@
 import { jest } from "@jest/globals";
-import { model, mockClient } from "./index.js";
+import { model, mockClient } from "../";
 import {
     nameFieldMock,
     jobFieldMock,

@@ -1,5 +1,5 @@
 import { jest } from "@jest/globals";
-import { model, mockClient } from ".";
+import { model, mockClient } from "../";
 
 describe(`Model's delete method tests`, () => {
     const table = model.table("tests");

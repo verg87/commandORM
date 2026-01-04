@@ -1,5 +1,5 @@
 import { describe, jest } from "@jest/globals";
-import { model, mockClient } from ".";
+import { model, mockClient } from "../";
 import { nameFieldMock, jobFieldMock } from "../../__mocks__/mocks.js";
 
 describe(`Model's rename method tests`, () => {

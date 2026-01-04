@@ -1,4 +1,4 @@
-import { model, mockClient } from ".";
+import { model, mockClient } from "../";
 import { users } from "../../__mocks__/mocks.js";
 
 describe(`Models count method tests`, () => {
