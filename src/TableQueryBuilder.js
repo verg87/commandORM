@@ -18,9 +18,25 @@ class TableQueryBuilder extends QueryBuilder {
             on: "",
             where: "",
             order: "",
+            desc: "",
             limit: "",
             returning: "",
         };
+    }
+
+    /**
+     * Clears the sql actions and returns a promise of a decorator call with a callback.
+     * @param {string} sql The SQL string that have been created.
+     * @returns {Promise<any>} The result of a query.
+     */
+    async #__execute(sql) {
+        for (const action in this.sql) {
+            this.sql[action] = "";
+        }
+
+        return await this.model.decorator(async (sql, client) => {
+            return (await client.query(sql)).rows;
+        })(sql);
     }
 
     /**
@@ -313,7 +329,7 @@ class TableQueryBuilder extends QueryBuilder {
      * @returns {TableQueryBuilder} The current instance of the TableQueryBuilder.
      */
     desc() {
-        this._desc = true;
+        this.sql.desc = "DESC";
         return this;
     }
 
@@ -334,33 +350,27 @@ class TableQueryBuilder extends QueryBuilder {
      * @throws {Error} If any of the selected columns do not exist in the table.
      */
     async get() {
-        return await this.model.decorator(async (client) => {
-            if (!this.sql.select) throw new Error(`Columns haven't been selected`);
+        if (!this.sql.select) throw new Error(`Columns haven't been selected`);
 
-            const schemaData = await this.model.getSchemaData(this.tableName);
-            const columns = schemaData.map((row) => row.column_name);
+        const schemaData = await this.model.getSchemaData(this.tableName);
+        const columns = schemaData.map((row) => row.column_name);
 
-            if (
-                !this._select.every((col) => columns.includes(col)) &&
-                this._select[0] !== "*" &&
-                !this.sql.join
-            )
-                throw new Error(
-                    `Some of the selected columns don't exist in the "${this.tableName}" table`
-                );
+        if (
+            !this._select.every((col) => columns.includes(col)) &&
+            this._select[0] !== "*" &&
+            !this.sql.join
+        )
+            throw new Error(
+                `Some of the selected columns don't exist in the "${this.tableName}" table`
+            );
 
-            const sql =
-                Object.values(this.sql)
-                    .filter((value) => value)
-                    .join(" ")
-                    .trim() + ";";
+        const sql =
+            Object.values(this.sql)
+                .filter((value) => value)
+                .join(" ")
+                .trim() + ";";
 
-            const res = (await client.query(sql)).rows;
-
-            if (this._desc) res.reverse();
-
-            return res;
-        })();
+        return await this.#__execute(sql);
     }
 
     /**
@@ -368,17 +378,15 @@ class TableQueryBuilder extends QueryBuilder {
      * @returns {Promise<Array<object>>} A promise that resolves to an array of the deleted rows.
      */
     async delete() {
-        return await this.model.decorator(async (client) => {
-            const { where, returning } = this.sql;
-            const sql = format(
-                `DELETE FROM %I %s %s;`,
-                this.tableName,
-                where,
-                returning
-            );
+        const { where, returning } = this.sql;
+        const sql = format(
+            `DELETE FROM %I %s %s;`,
+            this.tableName,
+            where,
+            returning
+        );
 
-            return (await client.query(sql)).rows;
-        })();
+        return await this.#__execute(sql);
     }
 
     /**
@@ -445,13 +453,11 @@ class TableQueryBuilder extends QueryBuilder {
      * @returns {Promise<Array<object>>} A promise that resolves to an array of the inserted rows.
      */
     async insert(values) {
-        return await this.model.decorator(async (values, client) => {
-            let [sql, _, __] = await this.#__insert(values);
+        let [sql, _, __] = await this.#__insert(values);
 
-            sql = format(`%s %s`, sql, this.sql.returning);
+        sql = format(`%s %s`, sql, this.sql.returning);
 
-            return (await client.query(sql)).rows;
-        })(values);
+        return await this.#__execute(sql);
     }
 
     /**
@@ -460,22 +466,20 @@ class TableQueryBuilder extends QueryBuilder {
      * @returns {Promise<Array<object>>} A promise that resolves to an array of the updated rows.
      */
     async update(values) {
-        return await this.model.decorator(async (values, client) => {
-            const set = Object.entries(values).map(([key, value]) =>
-                format(`%I = %L`, key, value)
-            );
+        const set = Object.entries(values).map(([key, value]) =>
+            format(`%I = %L`, key, value)
+        );
 
-            const { where, returning } = this.sql;
-            const sql = format(
-                `UPDATE %I SET %s %s %s;`,
-                this.tableName,
-                set,
-                where,
-                returning
-            );
+        const { where, returning } = this.sql;
+        const sql = format(
+            `UPDATE %I SET %s %s %s;`,
+            this.tableName,
+            set,
+            where,
+            returning
+        );
 
-            return (await client.query(sql)).rows;
-        })(values);
+        return await this.#__execute(sql);
     }
 
     /**
@@ -495,32 +499,30 @@ class TableQueryBuilder extends QueryBuilder {
             })();
         }
 
-        return await this.model.decorator(async (values, client) => {
-            const primaryKeyColumns = primaryKeys.map((col) => col.column_name);
-            const columnsToUpdate = schemaData.filter(
-                (col) => !primaryKeyColumns.includes(col.column_name)
-            );
+        const primaryKeyColumns = primaryKeys.map((col) => col.column_name);
+        const columnsToUpdate = schemaData.filter(
+            (col) => !primaryKeyColumns.includes(col.column_name)
+        );
 
-            const sqlSetValuesString = columnsToUpdate
-                .map((col) => {
-                    if (values[col.column_name]) {
-                        return format(`%1$I = EXCLUDED.%1$I`, col.column_name);
-                    }
+        const sqlSetValuesString = columnsToUpdate
+            .map((col) => {
+                if (values[col.column_name]) {
+                    return format(`%1$I = EXCLUDED.%1$I`, col.column_name);
+                }
 
-                    return format(`%I = %L`, col.column_name, col.column_default);
-                })
-                .join(", ");
+                return format(`%I = %L`, col.column_name, col.column_default);
+            })
+            .join(", ");
 
-            sql = format(
-                `%s ON CONFLICT (%I) DO UPDATE SET %s %s`,
-                sql,
-                primaryKeys[0].column_name,
-                sqlSetValuesString,
-                this.sql.returning
-            );
+        sql = format(
+            `%s ON CONFLICT (%I) DO UPDATE SET %s %s`,
+            sql,
+            primaryKeys[0].column_name,
+            sqlSetValuesString,
+            this.sql.returning
+        );
 
-            return (await client.query(sql)).rows;
-        })(values);
+        return await this.#__execute(sql);
     }
 
     /**
@@ -600,31 +602,29 @@ class TableQueryBuilder extends QueryBuilder {
      * @throws {Error} If a default value is specified for a serial primary key.
      */
     async add(columnData) {
-        await this.model.decorator(async (columnData, client) => {
-            const { type, defaultValue } = columnData;
+        const { type, defaultValue } = columnData;
 
-            let { sql, name, sqlType, defaultClause, nullClause, initialColumn } =
-                await this.#__alter(columnData);
+        let { sql, name, sqlType, defaultClause, nullClause, initialColumn } =
+            await this.#__alter(columnData);
 
-            if (initialColumn.length) {
-                throw new Error(`There is already column with name ${name}.`);
-            }
+        if (initialColumn.length) {
+            throw new Error(`There is already column with name ${name}.`);
+        }
 
-            if (type === "pk" && defaultValue) {
-                throw new Error(`Can't add a serial primary key with a default value.`);
-            }
+        if (type === "pk" && defaultValue) {
+            throw new Error(`Can't add a serial primary key with a default value.`);
+        }
 
-            sql = format(
-                `%s ADD COLUMN %I %s %s %s;`,
-                sql,
-                name,
-                sqlType,
-                nullClause,
-                defaultClause
-            );
+        sql = format(
+            `%s ADD COLUMN %I %s %s %s;`,
+            sql,
+            name,
+            sqlType,
+            nullClause,
+            defaultClause
+        );
 
-            await client.query(sql);
-        })(columnData);
+        await this.#__execute(sql);
     }
 
     /**
@@ -642,96 +642,94 @@ class TableQueryBuilder extends QueryBuilder {
      * @throws {Error} If an unsupported data type is specified.
      */
     async modify(columnData) {
-        await this.model.decorator(async (columnData, client) => {
-            const { type } = columnData;
+        const { type } = columnData;
 
-            let {
-                sql,
-                name,
-                sqlType,
-                defaultClause,
-                nullClause,
-                initialColumn,
-                initialDataType,
-            } = await this.#__alter(columnData);
+        let {
+            sql,
+            name,
+            sqlType,
+            defaultClause,
+            nullClause,
+            initialColumn,
+            initialDataType,
+        } = await this.#__alter(columnData);
 
-            if (!initialColumn.length) {
-                throw new Error(`There is no such column as ${name}.`);
+        if (!initialColumn.length) {
+            throw new Error(`There is no such column as ${name}.`);
+        }
+
+        switch (type) {
+            case "float":
+            case "int": {
+                const numericTypes = [
+                    "integer",
+                    "decimal",
+                    "smallint",
+                    "bigint",
+                    "real",
+                    "double precision",
+                    "numeric",
+                ];
+
+                if (!numericTypes.includes(initialDataType)) {
+                    throw new Error(
+                        "Can not convert non-numeric data types into numeric."
+                    );
+                }
+
+                break;
+            }
+            case "date":
+            case "time":
+            case "timestamp": {
+                const dateTypes = [
+                    "date",
+                    "time",
+                    "timestamp",
+                    "timestamp without time zone",
+                    "interval",
+                ];
+
+                if (!dateTypes.includes(initialDataType)) {
+                    throw new Error(
+                        "Can not convert non-date types into date like types."
+                    );
+                }
+
+                break;
+            }
+            case "string":
+                break;
+            default:
+                throw new Error(`Unsupported data type: ${type}.`);
+        }
+
+        const nullAction = (() => {
+            if (nullClause) {
+                return format(`%s ALTER COLUMN %I SET %s;`, sql, name, nullClause);
             }
 
-            switch (type) {
-                case "float":
-                case "int": {
-                    const numericTypes = [
-                        "integer",
-                        "decimal",
-                        "smallint",
-                        "bigint",
-                        "real",
-                        "double precision",
-                        "numeric",
-                    ];
+            return "";
+        })();
 
-                    if (!numericTypes.includes(initialDataType)) {
-                        throw new Error(
-                            "Can not convert non-numeric data types into numeric."
-                        );
-                    }
-
-                    break;
-                }
-                case "date":
-                case "time":
-                case "timestamp": {
-                    const dateTypes = [
-                        "date",
-                        "time",
-                        "timestamp",
-                        "timestamp without time zone",
-                        "interval",
-                    ];
-
-                    if (!dateTypes.includes(initialDataType)) {
-                        throw new Error(
-                            "Can not convert non-date types into date like types."
-                        );
-                    }
-
-                    break;
-                }
-                case "string":
-                    break;
-                default:
-                    throw new Error(`Unsupported data type: ${type}.`);
+        const defaultAction = (() => {
+            if (defaultClause) {
+                return format(`%s ALTER COLUMN %I SET %s;`, sql, name, defaultClause);
             }
 
-            const nullAction = (() => {
-                if (nullClause) {
-                    return format(`%s ALTER COLUMN %I SET %s;`, sql, name, nullClause);
-                }
+            return "";
+        })();
 
-                return "";
-            })();
+        sql = format(
+            `%s ALTER COLUMN %I TYPE %s; %s %s`,
+            sql,
+            name,
+            sqlType,
+            nullAction,
+            defaultAction
+        );
 
-            const defaultAction = (() => {
-                if (defaultClause) {
-                    return format(`%s ALTER COLUMN %I SET %s;`, sql, name, defaultClause);
-                }
-
-                return "";
-            })();
-
-            sql = format(
-                `%s ALTER COLUMN %I TYPE %s; %s %s`,
-                sql,
-                name,
-                sqlType,
-                nullAction,
-                defaultAction
-            );
-
-            await client.query(sql);
-        })(columnData);
+        await this.#__execute(sql);
     }
 
     /**
@@ -740,26 +738,24 @@ class TableQueryBuilder extends QueryBuilder {
      * @param {string} newName The new name of the column.
      */
     async rename(oldName, newName) {
-        await this.model.decorator(async (oldName, newName, client) => {
-            validateSQLName(oldName, newName);
+        validateSQLName(oldName, newName);
 
-            const schemaData = await this.model.getSchemaData(this.tableName);
-            const columns = schemaData.map((col) => col.column_name);
+        const schemaData = await this.model.getSchemaData(this.tableName);
+        const columns = schemaData.map((col) => col.column_name);
 
-            if (!columns.includes(oldName))
-                throw new Error(
-                    `There's no such column as "${oldName}" in the table "${this.tableName}"`
-                );
-
-            const sql = format(
-                `ALTER TABLE %I RENAME COLUMN %I TO %I`,
-                this.tableName,
-                oldName,
-                newName
+        if (!columns.includes(oldName))
+            throw new Error(
+                `There's no such column as "${oldName}" in the table "${this.tableName}"`
             );
 
-            await client.query(sql);
-        })(oldName, newName);
+        const sql = format(
+            `ALTER TABLE %I RENAME COLUMN %I TO %I`,
+            this.tableName,
+            oldName,
+            newName
+        );
+
+        await this.#__execute(sql);
     }
 
     /**
@@ -767,25 +763,19 @@ class TableQueryBuilder extends QueryBuilder {
      * @param {string} column The name of the column to delete.
      */
     async del(column) {
-        await this.model.decorator(async (column, client) => {
-            validateSQLName(column);
+        validateSQLName(column);
 
-            const schemaData = await this.model.getSchemaData(this.tableName);
-            const columns = schemaData.map((col) => col.column_name);
+        const schemaData = await this.model.getSchemaData(this.tableName);
+        const columns = schemaData.map((col) => col.column_name);
 
-            if (!columns.includes(column))
-                throw new Error(
-                    `There's no such column as "${column}" in the table "${this.tableName}"`
-                );
-
-            const sql = format(
-                `ALTER TABLE %I DROP COLUMN %I`,
-                this.tableName,
-                column
+        if (!columns.includes(column))
+            throw new Error(
+                `There's no such column as "${column}" in the table "${this.tableName}"`
             );
 
-            await client.query(sql);
-        })(column);
+        const sql = format(`ALTER TABLE %I DROP COLUMN %I`, this.tableName, column);
+
+        await this.#__execute(sql);
     }
 
     /**
@@ -795,19 +785,17 @@ class TableQueryBuilder extends QueryBuilder {
      * @returns Promise<int> the number of rows in the table
      */
     async count(column) {
-        return await this.model.decorator(async (column, client) => {
-            if (column) {
-                validateSQLName(column);
-            } else {
-                column = "*";
-            }
+        if (column) {
+            validateSQLName(column);
+        } else {
+            column = "*";
+        }
 
-            const sql = format(`SELECT COUNT(%s) FROM %I`, column, this.tableName);
+        const sql = format(`SELECT COUNT(%s) FROM %I`, column, this.tableName);
 
-            const { rows } = await client.query(sql);
+        const rows = await this.#__execute(sql);
 
-            return parseInt(rows[0].count);
-        })(column);
+        return parseInt(rows[0].count);
     }
 
     /**
@@ -816,15 +804,13 @@ class TableQueryBuilder extends QueryBuilder {
      * @returns {Promise<number>} A promise that resolves to the sum of the values in the specified column.
      */
     async sum(column) {
-        return await this.model.decorator(async (column, client) => {
-            validateSQLName(column);
+        validateSQLName(column);
 
-            const sql = format(`SELECT SUM(%s) FROM %I`, column, this.tableName);
+        const sql = format(`SELECT SUM(%s) FROM %I`, column, this.tableName);
 
-            const { rows } = await client.query(sql);
+        const rows = await this.#__execute(sql);
 
-            return parseInt(rows[0].sum);
-        })(column);
+        return parseInt(rows[0].sum);
     }
 
     /**
@@ -835,22 +821,20 @@ class TableQueryBuilder extends QueryBuilder {
      * @throws {Error} If the precision is not within the range of 0-100.
      */
     async avg(column, precision) {
-        return await this.model.decorator(async (column, precision, client) => {
-            validateSQLName(column);
+        validateSQLName(column);
 
-            if (typeof precision === "number" && (precision > 100 || precision < 0))
-                throw new Error("Precision must in range of 0-100");
+        if (typeof precision === "number" && (precision > 100 || precision < 0))
+            throw new Error("Precision must in range of 0-100");
 
-            const sql = format(`SELECT AVG(%s) FROM %I`, column, this.tableName);
+        const sql = format(`SELECT AVG(%s) FROM %I`, column, this.tableName);
 
-            const { rows } = await client.query(sql);
+        const rows = await this.#__execute(sql);
 
-            if (typeof precision === "number") {
-                return parseFloat(parseFloat(rows[0].avg).toFixed(parseInt(precision)));
-            }
+        if (typeof precision === "number") {
+            return parseFloat(parseFloat(rows[0].avg).toFixed(parseInt(precision)));
+        }
 
-            return parseFloat(rows[0].avg);
-        })(column, precision);
+        return parseFloat(rows[0].avg);
     }
 
     /**
@@ -860,17 +844,15 @@ class TableQueryBuilder extends QueryBuilder {
      * @returns {Promise<number|string>} A promise that resolves to the lowest value in the specified column.
      */
     async min(column) {
-        return await this.model.decorator(async (column, client) => {
-            validateSQLName(column);
+        validateSQLName(column);
 
-            const sql = format(`SELECT MIN(%s) FROM %I`, column, this.tableName);
+        const sql = format(`SELECT MIN(%s) FROM %I`, column, this.tableName);
 
-            const { rows } = await client.query(sql);
+        const rows = await this.#__execute(sql);
 
-            return /^\d+(\.\d+)?$/.test(rows[0].min)
-                ? parseFloat(rows[0].min)
-                : rows[0].min;
-        })(column);
+        return /^\d+(\.\d+)?$/.test(rows[0].min)
+            ? parseFloat(rows[0].min)
+            : rows[0].min;
     }
 
     /**
@@ -880,17 +862,15 @@ class TableQueryBuilder extends QueryBuilder {
      * @returns {Promise<number|string>} A promise that resolves to the largest value in the specified column.
      */
     async max(column) {
-        return await this.model.decorator(async (column, client) => {
-            validateSQLName(column);
+        validateSQLName(column);
 
-            const sql = format(`SELECT MAX(%s) FROM %I`, column, this.tableName);
+        const sql = format(`SELECT MAX(%s) FROM %I`, column, this.tableName);
 
-            const { rows } = await client.query(sql);
+        const rows = await this.#__execute(sql);
 
-            return /^\d+(\.\d+)?$/.test(rows[0].max)
-                ? parseFloat(rows[0].max)
-                : rows[0].max;
-        })(column);
+        return /^\d+(\.\d+)?$/.test(rows[0].max)
+            ? parseFloat(rows[0].max)
+            : rows[0].max;
     }
 
     /**
@@ -898,13 +878,11 @@ class TableQueryBuilder extends QueryBuilder {
      * @returns the very first row in the table
      */
     async first() {
-        return await this.model.decorator(async (client) => {
-            const sql = format(`SELECT * FROM %I LIMIT 1`, this.tableName);
+        const sql = format(`SELECT * FROM %I LIMIT 1`, this.tableName);
 
-            const { rows } = await client.query(sql);
+        const rows = await this.#__execute(sql);
 
-            return rows[0];
-        })();
+        return rows[0];
     }
 
     /**
@@ -916,17 +894,13 @@ class TableQueryBuilder extends QueryBuilder {
         let obj;
 
         if (hasPrimaryKeys.length) {
-            obj = await this.model.decorator(async (client) => {
-                const sql = format(
-                    `SELECT * FROM %I ORDER BY (%s) DESC LIMIT 1`,
-                    this.tableName,
-                    hasPrimaryKeys.map((col) => col.column_name)
-                );
+            const sql = format(
+                `SELECT * FROM %I ORDER BY (%s) DESC LIMIT 1`,
+                this.tableName,
+                hasPrimaryKeys.map((col) => col.column_name)
+            );
 
-                return await client.query(sql);
-            })();
-
-            obj = obj.rows;
+            obj = await this.#__execute(sql);
         } else {
             obj = await this.select().get();
         }

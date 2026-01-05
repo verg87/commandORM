@@ -1,7 +1,7 @@
 import format from "pg-format";
 import { Pool } from "pg";
-import { validateSQLName } from "./validation";
-import { TableQueryBuilder } from "./TableQueryBuilder";
+import { validateSQLName } from "./validation.js";
+import { TableQueryBuilder } from "./TableQueryBuilder.js";
 
 class Model {
     /**

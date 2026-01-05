@@ -68,6 +68,7 @@ describe("Model's get tests", () => {
 
         const reversedTableContents = await table
             .select()
+            .orderBy("name")
             .desc()
             .get();
 
@@ -91,7 +92,7 @@ describe("Model's get tests", () => {
                 rows: [nameFieldMock, jobFieldMock, ageFieldMock],
             })
             .mockResolvedValueOnce({
-                rows: users.slice(0, 2).reverse(),
+                rows: users.slice(0, 2),
             });
 
         const tableContentsWithLimit = await table
@@ -109,7 +110,7 @@ describe("Model's get tests", () => {
                 rows: [nameFieldMock, jobFieldMock, ageFieldMock],
             })
             .mockResolvedValueOnce({
-                rows: users.sort((a, b) => a.age !== null && b.age !== null ? b.age - a.age : -1),
+                rows: users.sort((a, b) => a.age !== null && b.age !== null ? a.age - b.age : 0),
             });
 
         const tableContentsOrderedByAge = await table

@@ -7,9 +7,11 @@ describe(`Model's rename method tests`, () => {
     const renameSpy = jest.spyOn(table, "rename");
 
     test(`Rename a column`, async () => {
-        mockClient.query.mockResolvedValueOnce({
-            rows: [nameFieldMock, jobFieldMock],
-        });
+        mockClient.query
+            .mockResolvedValueOnce({
+                rows: [nameFieldMock, jobFieldMock],
+            })
+            .mockResolvedValueOnce({ rows: [] });
 
         await table.rename("job", "work");
 
