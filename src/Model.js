@@ -34,6 +34,37 @@ class Model {
     }
 
     /**
+     * Begins a new database transaction. All subsequent operations will be part of this transaction
+     * until either `commit()` or `rollback()` is called.
+     * @returns {Promise<void>} A promise that resolves when the transaction has begun.
+     */
+    async begin() {
+        return await this.decorator(async (client) => {
+            await client.query("BEGIN");
+        })();
+    }
+
+    /**
+     * Commits the current database transaction, making all changes permanent.
+     * @returns {Promise<void>} A promise that resolves when the transaction has been committed.
+     */
+    async commit() {
+        return await this.decorator(async (client) => {
+            await client.query("COMMIT");
+        })();
+    }
+
+    /**
+     * Rolls back the current database transaction, discarding all changes made since `begin()`.
+     * @returns {Promise<void>} A promise that resolves when the transaction has been rolled back.
+     */
+    async rollback() {
+        return await this.decorator(async (client) => {
+            await client.query("ROLLBACK");
+        })();
+    }
+
+    /**
      * Closes all connections to the PostgreSQL server.
      * Should be run at the end of the programm.
      */

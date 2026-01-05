@@ -439,8 +439,9 @@ class TableQueryBuilder extends QueryBuilder {
         const sqlValuesString = sortedValues.map((row) => format(`(%L)`, row));
 
         const sql = format(
-            `INSERT INTO %I VALUES %s`,
+            `INSERT INTO %I (%I) VALUES %s`,
             this.tableName,
+            columns,
             sqlValuesString
         );
 
@@ -492,11 +493,9 @@ class TableQueryBuilder extends QueryBuilder {
 
         if (!primaryKeys.length) {
             // Do an insert
-            return await this.model.decorator(async (client) => {
-                sql = format(`%s %s`, sql, this.sql.returning);
+            sql = format(`%s %s`, sql, this.sql.returning);
 
-                return (await client.query(sql)).rows;
-            })();
+            return await this.#__execute(sql);
         }
 
         const primaryKeyColumns = primaryKeys.map((col) => col.column_name);
