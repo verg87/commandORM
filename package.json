@@ -1,6 +1,6 @@
 {
   "name": "commandorm",
-  "version": "1.2.4",
+  "version": "1.2.5",
   "description": "ORM/QueryBuilder for PostgreSQL and CSV",
   "homepage": "https://github.com/verg87/commandORM#readme",
   "bugs": {
