@@ -40,6 +40,17 @@ class TableQueryBuilder extends QueryBuilder {
     }
 
     /**
+     * Returns a sql query that is a product of every previos TableQueryBuilder method calls.
+     * @returns {string} The sql query.
+     */
+    toSql() {
+        return Object.values(this.sql)
+            .filter((value) => value)
+            .join(" ")
+            .trim() + ";";
+    }
+
+    /**
      * Specifies the columns to be selected.
      * @param {...string} columns The columns to select. If no columns are provided, all columns are selected.
      * @returns {TableQueryBuilder} The current instance of the TableQueryBuilder.
